@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>☽ Drive Music</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Space+Mono:wght@400;700&family=Instrument+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Instrument+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #f5f1ea;
@@ -73,7 +73,7 @@ body{
 }
 
 .screen-card h1{
-  font-family:'Playfair Display',serif;
+  font-family:'Instrument Sans',sans-serif;
   font-size:2rem;color:var(--cream);
   margin-bottom:8px;
 }
@@ -157,7 +157,7 @@ body{
   border-bottom:1px solid var(--border);
 }
 .sidebar-top h2{
-  font-family:'Playfair Display',serif;
+  font-family:'Instrument Sans',sans-serif;
   font-size:1.05rem;color:var(--cream);
 }
 
@@ -316,15 +316,31 @@ body{
 /* Track meta */
 .track-meta{text-align:center;width:100%;}
 .track-title-big{
-  font-family:'Playfair Display',serif;
+  font-family:'Instrument Sans',sans-serif;font-weight:600;
   font-size:1.35rem;color:var(--cream);
   margin-bottom:4px;line-height:1.3;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;overflow:hidden;
+  position:relative;
+}
+.track-title-big .marquee-inner{
+  display:inline-block;white-space:nowrap;
+}
+.track-title-big.scrolling .marquee-inner{
+  animation:marquee var(--marquee-duration,10s) linear infinite;
+}
+@keyframes marquee{
+  0%{transform:translateX(0);}
+  100%{transform:translateX(calc(-50% - 1.5em));}
 }
 .track-badge{
   font-family:'Space Mono',monospace;font-size:.68rem;
   color:var(--gold);text-transform:uppercase;letter-spacing:.14em;
 }
+.track-folder{
+  font-size:.72rem;color:var(--muted);margin-top:5px;
+  display:flex;align-items:center;justify-content:center;gap:4px;
+}
+.track-folder .tf-ico{font-size:.8rem;}
 
 /* Progress */
 .progress-section{width:100%;}
@@ -586,8 +602,9 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 
       <!-- Track info -->
       <div class="track-meta">
-        <div class="track-title-big" id="now-title">選擇一首歌</div>
+        <div class="track-title-big" id="now-title"><span class="marquee-inner">選擇一首歌</span></div>
         <div class="track-badge" id="now-ext">— 雲端音樂播放器 —</div>
+        <div class="track-folder" id="now-folder"><span class="tf-ico">📁</span><span id="now-folder-name"></span></div>
       </div>
 
       <!-- Progress -->
@@ -871,8 +888,9 @@ async function playTrack(idx) {
   /* Update now-playing UI */
   const name = t.name.replace(/\.[^.]+$/,'');
   const ext  = (t.name.split('.').pop()||'audio').toUpperCase();
-  document.getElementById('now-title').textContent = name;
+  setupMarquee('now-title', name);
   document.getElementById('now-ext').textContent   = ext;
+  document.getElementById('now-folder-name').textContent = currentFolderName;
   document.title = `♪ ${name}`;
 
   const label = document.getElementById('vinyl-label');
@@ -996,6 +1014,27 @@ document.addEventListener('keydown', e => {
     case 'KeyP':        prevTrack(); break;
   }
 });
+/* ── Marquee ────────────────────────────────────────────────── */
+function setupMarquee(elId, text) {
+  const wrap = document.getElementById(elId);
+  const inner = wrap.querySelector('.marquee-inner');
+  if (!inner) { wrap.textContent = text; return; }
+  wrap.classList.remove('scrolling');
+  inner.textContent = text;
+  /* Wait one frame so layout is computed */
+  requestAnimationFrame(() => {
+    const textW = inner.scrollWidth;
+    const wrapW = wrap.clientWidth;
+    if (textW > wrapW) {
+      /* Duplicate text for seamless loop */
+      inner.innerHTML = esc(text) + '&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;' + esc(text);
+      const speed = 40; /* pixels per second */
+      const dur = (inner.scrollWidth / 2 + 48) / speed;
+      wrap.style.setProperty('--marquee-duration', dur + 's');
+      wrap.classList.add('scrolling');
+    }
+  });
+}
 
 /* ── Utilities ──────────────────────────────────────────────── */
 function fmt(s) {
