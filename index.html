@@ -2,458 +2,105 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f5f1ea">
 <title>☽ Drive Music</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Instrument+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg: #f5f1ea;
-  --surface: #ffffff;
-  --card: #ffffff;
-  --border: #e2dbd0;
-  --gold: #8b6b2c;
-  --gold-glow: rgba(139,107,44,0.08);
-  --gold-dim: #c9a44a;
-  --cream: #1c1810;
-  --muted: #8a7e6c;
-  --danger: #c44b45;
-  --radius: 12px;
+:root{
+  --bg:#f5f1ea;--surface:#ffffff;--card:#ffffff;
+  --border:#e2dbd0;--gold:#8b6b2c;--gold-glow:rgba(139,107,44,0.08);
+  --gold-dim:#c9a44a;--cream:#1c1810;--muted:#8a7e6c;--danger:#c44b45;
+  /* safe area (notch phones) */
+  --sat:env(safe-area-inset-top,0px);
+  --sab:env(safe-area-inset-bottom,0px);
+  --sal:env(safe-area-inset-left,0px);
+  --sar:env(safe-area-inset-right,0px);
 }
-
-*{margin:0;padding:0;box-sizing:border-box;}
-
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overscroll-behavior:none;}
 body{
   font-family:'Instrument Sans',sans-serif;
-  background:var(--bg);
-  color:var(--cream);
-  height:100vh;
-  overflow:hidden;
-  display:flex;
-  flex-direction:column;
+  background:var(--bg);color:var(--cream);
+  height:100vh;overflow:hidden;display:flex;flex-direction:column;
 }
 
-/* ── Overlay screens ─────────────────────────────────────── */
-.screen{
-  position:fixed;inset:0;
-  background:var(--bg);
-  display:flex;align-items:center;justify-content:center;
-  z-index:100;
-  animation:fadeIn 0.4s ease;
-}
+/* ═══════════════════════════════
+   SCREENS (setup / login)
+═══════════════════════════════ */
+.screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:100;animation:fadeIn .4s ease;}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-
-.screen-card{
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:20px;
-  padding:48px 44px;
-  max-width:440px;
-  width:90%;
-  text-align:center;
-  box-shadow:0 8px 40px rgba(0,0,0,0.08);
-}
-
-.brand{
-  width:64px;height:64px;
-  border-radius:50%;
-  margin:0 auto 24px;
-  position:relative;
-  background:conic-gradient(
-    var(--gold) 0deg, #d4cbb8 60deg,
-    var(--gold) 120deg, #d4cbb8 180deg,
-    var(--gold) 240deg, #d4cbb8 300deg,
-    var(--gold) 360deg
-  );
-  box-shadow:0 0 24px rgba(139,107,44,0.18);
-}
-.brand::after{
-  content:'';position:absolute;inset:30%;
-  border-radius:50%;background:var(--card);
-}
-
-.screen-card h1{
-  font-family:'Instrument Sans',sans-serif;
-  font-size:2rem;color:var(--cream);
-  margin-bottom:8px;
-}
-.screen-card p{
-  color:var(--muted);font-size:0.88rem;
-  line-height:1.7;margin-bottom:28px;
-}
-
-.field-label{
-  text-align:left;font-size:0.72rem;
-  color:var(--muted);text-transform:uppercase;
-  letter-spacing:.1em;margin-bottom:6px;
-}
-.field-input{
-  width:100%;background:var(--surface);
-  border:1px solid var(--border);border-radius:8px;
-  padding:12px 16px;color:var(--cream);
-  font-family:'Space Mono',monospace;font-size:0.78rem;
-  outline:none;margin-bottom:20px;
-  transition:border-color .2s;
-}
+.screen-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:48px 44px;max-width:440px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.08);}
+.brand{width:64px;height:64px;border-radius:50%;margin:0 auto 24px;position:relative;background:conic-gradient(var(--gold) 0deg,#d4cbb8 60deg,var(--gold) 120deg,#d4cbb8 180deg,var(--gold) 240deg,#d4cbb8 300deg,var(--gold) 360deg);box-shadow:0 0 24px rgba(139,107,44,.18);}
+.brand::after{content:'';position:absolute;inset:30%;border-radius:50%;background:var(--card);}
+.screen-card h1{font-family:'Instrument Sans',sans-serif;font-size:2rem;color:var(--cream);margin-bottom:8px;}
+.screen-card p{color:var(--muted);font-size:.88rem;line-height:1.7;margin-bottom:28px;}
+.field-label{text-align:left;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;}
+.field-input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--cream);font-family:'Space Mono',monospace;font-size:.78rem;outline:none;margin-bottom:20px;transition:border-color .2s;}
 .field-input:focus{border-color:var(--gold);}
 .field-input::placeholder{color:var(--muted);}
-
-.btn-gold{
-  background:var(--gold);color:#fff;
-  border:none;border-radius:8px;
-  padding:14px;font-family:'Instrument Sans',sans-serif;
-  font-weight:600;font-size:.95rem;
-  cursor:pointer;width:100%;
-  transition:opacity .2s,transform .1s;
-}
-.btn-gold:hover{opacity:.9;}
-.btn-gold:active{transform:scale(.98);}
-
-.btn-ghost{
-  background:transparent;
-  border:1px solid var(--border);border-radius:8px;
-  padding:11px;color:var(--muted);
-  font-family:'Instrument Sans',sans-serif;
-  font-size:.82rem;cursor:pointer;width:100%;
-  margin-top:10px;transition:border-color .2s,color .2s;
-}
+.btn-gold{background:var(--gold);color:#fff;border:none;border-radius:8px;padding:14px;font-family:'Instrument Sans',sans-serif;font-weight:600;font-size:.95rem;cursor:pointer;width:100%;transition:opacity .2s,transform .1s;}
+.btn-gold:hover{opacity:.9;}.btn-gold:active{transform:scale(.98);}
+.btn-ghost{background:transparent;border:1px solid var(--border);border-radius:8px;padding:11px;color:var(--muted);font-family:'Instrument Sans',sans-serif;font-size:.82rem;cursor:pointer;width:100%;margin-top:10px;transition:border-color .2s,color .2s;}
 .btn-ghost:hover{border-color:var(--gold);color:var(--cream);}
-
-.hint{
-  font-size:.76rem;color:var(--muted);
-  margin-top:18px;line-height:1.6;
-}
+.hint{font-size:.76rem;color:var(--muted);margin-top:18px;line-height:1.6;}
 .hint a{color:var(--gold);text-decoration:none;}
 .hint code{color:var(--gold);font-family:'Space Mono',monospace;font-size:.7rem;}
-
-.google-btn{
-  display:flex;align-items:center;justify-content:center;gap:12px;
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:8px;padding:14px;
-  color:var(--cream);font-family:'Instrument Sans',sans-serif;
-  font-weight:500;font-size:.95rem;cursor:pointer;width:100%;
-  transition:background .2s,border-color .2s;
-}
+.google-btn{display:flex;align-items:center;justify-content:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;color:var(--cream);font-family:'Instrument Sans',sans-serif;font-weight:500;font-size:.95rem;cursor:pointer;width:100%;transition:background .2s,border-color .2s;}
 .google-btn:hover{background:var(--card);border-color:var(--gold);}
 
-/* ── App layout ──────────────────────────────────────────── */
-#app{
-  display:none;flex:1;overflow:hidden;
-  flex-direction:row;
-}
+/* ═══════════════════════════════
+   APP SHELL
+═══════════════════════════════ */
+#app{display:none;flex:1;overflow:hidden;flex-direction:row;}
 
-/* ── Sidebar ─────────────────────────────────────────────── */
-.sidebar{
-  width:290px;min-width:290px;
-  background:var(--surface);
-  border-right:1px solid var(--border);
-  display:flex;flex-direction:column;overflow:hidden;
-  box-shadow:2px 0 12px rgba(0,0,0,0.04);
-}
+/* ── Toast ── */
+.toast{position:fixed;bottom:calc(20px + var(--sab));left:50%;transform:translateX(-50%) translateY(80px);background:#1c1810;border:1px solid #2c2720;border-radius:8px;padding:9px 20px;font-size:.82rem;color:#f5f1ea;transition:transform .3s ease;z-index:300;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.15);}
+.toast.show{transform:translateX(-50%) translateY(0);}
+.token-warn{position:fixed;top:calc(14px + var(--sat));left:50%;transform:translateX(-50%);background:rgba(200,80,75,.1);border:1px solid rgba(200,80,75,.25);border-radius:20px;padding:5px 16px;font-size:.75rem;color:#b03030;display:none;z-index:20;cursor:pointer;}
 
-.sidebar-top{
-  padding:18px 18px 12px;
-  display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid var(--border);
-}
-.sidebar-top h2{
-  font-family:'Instrument Sans',sans-serif;
-  font-size:1.05rem;color:var(--cream);
-}
-
-.icon-btn{
-  background:none;border:1px solid var(--border);
-  border-radius:6px;color:var(--muted);
-  width:30px;height:30px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:color .2s,border-color .2s;
-}
+/* ═══════════════════════════════
+   DESKTOP SIDEBAR
+═══════════════════════════════ */
+.sidebar{width:290px;min-width:290px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;box-shadow:2px 0 12px rgba(0,0,0,.04);}
+.sidebar-top{padding:18px 18px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+.sidebar-top h2{font-family:'Instrument Sans',sans-serif;font-size:1.05rem;color:var(--cream);}
+.icon-btn{background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);width:30px;height:30px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .2s,border-color .2s;}
 .icon-btn:hover{color:var(--gold);border-color:var(--gold);}
-
 .search-wrap{padding:10px 14px;border-bottom:1px solid var(--border);}
-.search-input{
-  width:100%;background:var(--bg);
-  border:1px solid var(--border);border-radius:6px;
-  padding:7px 12px;color:var(--cream);
-  font-family:'Instrument Sans',sans-serif;font-size:.83rem;outline:none;
-  transition:border-color .2s;
-}
+.search-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 12px;color:var(--cream);font-family:'Instrument Sans',sans-serif;font-size:.83rem;outline:none;transition:border-color .2s;}
 .search-input:focus{border-color:var(--gold);}
 .search-input::placeholder{color:var(--muted);}
-
-.track-list{
-  flex:1;overflow-y:auto;padding:6px;
-}
+.track-list{flex:1;overflow-y:auto;padding:6px;}
 .track-list::-webkit-scrollbar{width:3px;}
-.track-list::-webkit-scrollbar-track{background:transparent;}
 .track-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
-
-.track-item{
-  display:flex;align-items:center;gap:10px;
-  padding:9px 12px;border-radius:7px;cursor:pointer;
-  transition:background .15s;border:1px solid transparent;
-}
-.track-item:hover{background:var(--card);}
-.track-item.active{
-  background:var(--gold-glow);
-  border-color:rgba(200,168,75,.2);
-}
-
-.t-num{
-  font-family:'Space Mono',monospace;font-size:.68rem;
-  color:var(--muted);min-width:18px;text-align:right;
-}
+.track-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:7px;cursor:pointer;transition:background .15s;border:1px solid transparent;}
+.track-item:hover{background:var(--bg);}
+.track-item.active{background:var(--gold-glow);border-color:rgba(139,107,44,.18);}
+.t-num{font-family:'Space Mono',monospace;font-size:.68rem;color:var(--muted);min-width:18px;text-align:right;}
 .track-item.active .t-num{color:var(--gold);}
-
 .t-info{flex:1;min-width:0;}
-.t-name{
-  font-size:.82rem;color:var(--cream);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  margin-bottom:1px;
-}
+.t-name{font-size:.82rem;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:1px;}
 .track-item.active .t-name{color:var(--gold);}
-.t-ext{
-  font-family:'Space Mono',monospace;font-size:.62rem;
-  color:var(--muted);text-transform:uppercase;
-}
-
-.eq-anim{
-  display:none;align-items:flex-end;gap:2px;height:14px;
-}
+.t-ext{font-family:'Space Mono',monospace;font-size:.62rem;color:var(--muted);text-transform:uppercase;}
+.eq-anim{display:none;align-items:flex-end;gap:2px;height:14px;}
 .track-item.active .eq-anim{display:flex;}
-.eq-bar{
-  width:2px;background:var(--gold);border-radius:1px;
-  animation:eq .8s ease-in-out infinite alternate;
-}
+.eq-bar{width:2px;background:var(--gold);border-radius:1px;animation:eq .8s ease-in-out infinite alternate;}
 .eq-bar:nth-child(1){height:7px;animation-delay:0s;}
 .eq-bar:nth-child(2){height:13px;animation-delay:.18s;}
 .eq-bar:nth-child(3){height:5px;animation-delay:.35s;}
-@keyframes eq{
-  from{transform:scaleY(.25);}
-  to{transform:scaleY(1);}
-}
-
-.list-state{
-  padding:36px 16px;text-align:center;
-  color:var(--muted);font-size:.82rem;line-height:1.6;
-}
-.spinner{
-  width:22px;height:22px;
-  border:2px solid var(--border);
-  border-top-color:var(--gold);
-  border-radius:50%;
-  animation:spin 0.7s linear infinite;
-  margin:0 auto 12px;
-}
+@keyframes eq{from{transform:scaleY(.25);}to{transform:scaleY(1);}}
+.list-state{padding:36px 16px;text-align:center;color:var(--muted);font-size:.82rem;line-height:1.6;}
+.spinner{width:22px;height:22px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 12px;}
 @keyframes spin{to{transform:rotate(360deg);}}
 
-/* ── Player main ─────────────────────────────────────────── */
-.player-main{
-  flex:1;display:flex;align-items:center;
-  justify-content:center;padding:40px 30px;
-  position:relative;overflow:hidden;
-}
-.player-main::before{
-  content:'';position:absolute;
-  width:600px;height:600px;border-radius:50%;
-  background:radial-gradient(circle,rgba(139,107,44,.06) 0%,transparent 68%);
-  pointer-events:none;
-}
-
-.now-playing{
-  display:flex;flex-direction:column;
-  align-items:center;gap:24px;
-  width:100%;max-width:360px;
-}
-
-/* Vinyl */
-.vinyl-wrap{
-  position:relative;
-  width:220px;height:220px;
-}
-
-.vinyl-disc{
-  width:220px;height:220px;border-radius:50%;
-  background:
-    repeating-conic-gradient(
-      from 0deg,
-      #2c2824 0deg, #1c1814 1.8deg, #2c2824 3.5deg
-    );
-  box-shadow:
-    0 0 0 2px rgba(0,0,0,0.1),
-    0 24px 64px rgba(0,0,0,.25);
-  animation:vspin 5s linear infinite;
-  animation-play-state:paused;
-  position:relative;
-}
-.vinyl-disc.spinning{animation-play-state:running;}
-@keyframes vspin{to{transform:rotate(360deg);}}
-
-.vinyl-label{
-  position:absolute;
-  top:50%;left:50%;
-  transform:translate(-50%,-50%);
-  width:78px;height:78px;border-radius:50%;
-  background:radial-gradient(circle at 38% 38%,#d4b85a,#7a5818);
-  display:flex;align-items:center;justify-content:center;
-  overflow:hidden;
-}
-.vinyl-label img{
-  width:100%;height:100%;
-  object-fit:cover;border-radius:50%;
-}
-.vinyl-label-icon{font-size:1.6rem;opacity:.5;}
-
-/* Center hole */
-.vinyl-disc::after{
-  content:'';
-  position:absolute;top:50%;left:50%;
-  transform:translate(-50%,-50%);
-  width:8px;height:8px;border-radius:50%;
-  background:var(--bg);z-index:1;
-}
-
-/* Track meta */
-.track-meta{text-align:center;width:100%;}
-.track-title-big{
-  font-family:'Instrument Sans',sans-serif;font-weight:600;
-  font-size:1.35rem;color:var(--cream);
-  margin-bottom:4px;line-height:1.3;
-  white-space:nowrap;overflow:hidden;
-  position:relative;
-}
-.track-title-big .marquee-inner{
-  display:inline-block;white-space:nowrap;
-}
-.track-title-big.scrolling .marquee-inner{
-  animation:marquee var(--marquee-duration,10s) linear infinite;
-}
-@keyframes marquee{
-  0%{transform:translateX(0);}
-  100%{transform:translateX(calc(-50% - 1.5em));}
-}
-.track-badge{
-  font-family:'Space Mono',monospace;font-size:.68rem;
-  color:var(--gold);text-transform:uppercase;letter-spacing:.14em;
-}
-.track-folder{
-  font-size:.72rem;color:var(--muted);margin-top:5px;
-  display:flex;align-items:center;justify-content:center;gap:4px;
-}
-.track-folder .tf-ico{font-size:.8rem;}
-
-/* Progress */
-.progress-section{width:100%;}
-.prog-times{
-  display:flex;justify-content:space-between;
-  font-family:'Space Mono',monospace;font-size:.68rem;
-  color:var(--muted);margin-bottom:8px;
-}
-input[type="range"]{
-  -webkit-appearance:none;appearance:none;
-  background:transparent;cursor:pointer;width:100%;
-}
-input[type="range"]#seek-bar::-webkit-slider-runnable-track{
-  height:3px;background:var(--border);border-radius:2px;
-}
-input[type="range"]#seek-bar::-webkit-slider-thumb{
-  -webkit-appearance:none;
-  width:13px;height:13px;border-radius:50%;
-  background:var(--gold);margin-top:-5px;
-  box-shadow:0 0 0 0 rgba(200,168,75,.3);
-  transition:box-shadow .2s;
-}
-input[type="range"]#seek-bar:hover::-webkit-slider-thumb{
-  box-shadow:0 0 0 4px rgba(200,168,75,.2);
-}
-input[type="range"]#vol-bar::-webkit-slider-runnable-track{
-  height:3px;background:var(--border);border-radius:2px;
-}
-input[type="range"]#vol-bar::-webkit-slider-thumb{
-  -webkit-appearance:none;
-  width:11px;height:11px;border-radius:50%;
-  background:var(--muted);margin-top:-4px;
-  transition:background .2s;
-}
-input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);}
-
-/* Controls */
-.ctrl-row{
-  display:flex;align-items:center;gap:14px;
-}
-.ctrl-btn{
-  background:none;border:none;color:var(--muted);
-  cursor:pointer;padding:6px;border-radius:6px;
-  display:flex;align-items:center;justify-content:center;
-  transition:color .2s;font-size:1rem;
-}
-.ctrl-btn:hover{color:var(--cream);}
-.ctrl-btn.on{color:var(--gold);}
-
-.play-btn{
-  width:54px;height:54px;border-radius:50%;
-  background:var(--gold);border:none;color:#fff;
-  cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:transform .1s,opacity .2s;
-  padding-left:2px;
-}
-.play-btn:hover{opacity:.9;}
-.play-btn:active{transform:scale(.95);}
-
-.vol-row{
-  display:flex;align-items:center;gap:10px;
-  width:100%;
-}
-.vol-icon{color:var(--muted);min-width:16px;}
-
-/* User chip */
-.user-chip{
-  position:fixed;top:14px;right:14px;
-  display:flex;align-items:center;gap:8px;
-  background:var(--card);border:1px solid var(--border);
-  border-radius:20px;padding:5px 14px 5px 7px;
-  font-size:.78rem;color:var(--muted);
-  cursor:pointer;z-index:10;transition:border-color .2s;
-  box-shadow:0 2px 8px rgba(0,0,0,0.06);
-}
-.user-chip:hover{border-color:var(--gold);}
-.user-av{
-  width:22px;height:22px;border-radius:50%;
-  background:var(--gold-dim);
-  display:flex;align-items:center;justify-content:center;
-  font-size:.68rem;color:var(--gold);font-weight:600;
-}
-
-/* Toast */
-.toast{
-  position:fixed;bottom:20px;left:50%;
-  transform:translateX(-50%) translateY(60px);
-  background:#1c1810;border:1px solid #2c2720;
-  border-radius:8px;padding:9px 20px;
-  font-size:.82rem;color:#f5f1ea;
-  transition:transform .3s ease;z-index:200;
-  white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.15);
-}
-.toast.show{transform:translateX(-50%) translateY(0);}
-
-/* Token warning badge */
-.token-warn{
-  position:fixed;top:14px;left:50%;transform:translateX(-50%);
-  background:rgba(200,80,75,.1);border:1px solid rgba(200,80,75,.25);
-  border-radius:20px;padding:5px 16px;
-  font-size:.75rem;color:#b03030;
-  display:none;z-index:20;cursor:pointer;
-}
-
-/* ── Folder selector ─────────────────────────────────────── */
+/* ── Folder selector (desktop sidebar) ── */
 .folder-section{border-bottom:1px solid var(--border);}
-.folder-toggle{
-  display:flex;align-items:center;gap:8px;width:100%;
-  background:none;border:none;padding:9px 14px;
-  color:var(--cream);font-family:'Instrument Sans',sans-serif;
-  font-size:.82rem;cursor:pointer;transition:background .15s;
-}
+.folder-toggle{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;padding:9px 14px;color:var(--cream);font-family:'Instrument Sans',sans-serif;font-size:.82rem;cursor:pointer;transition:background .15s;}
 .folder-toggle:hover{background:var(--bg);}
 .folder-toggle .folder-ico{color:var(--gold);font-size:1rem;}
 .folder-toggle .folder-name{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -466,12 +113,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 .fp-search{width:calc(100% - 20px);margin:8px 10px 4px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:5px;font-size:.78rem;color:var(--cream);outline:none;font-family:'Instrument Sans',sans-serif;}
 .fp-search:focus{border-color:var(--gold);}
 .fp-search::placeholder{color:var(--muted);}
-.fp-item{
-  display:flex;align-items:center;gap:8px;
-  padding:7px 14px;cursor:pointer;font-size:.8rem;
-  color:var(--cream);transition:background .1s;border:none;background:none;width:100%;
-  font-family:'Instrument Sans',sans-serif;
-}
+.fp-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;font-size:.8rem;color:var(--cream);transition:background .1s;border:none;background:none;width:100%;font-family:'Instrument Sans',sans-serif;}
 .fp-item:hover{background:var(--surface);}
 .fp-item.active{color:var(--gold);font-weight:600;}
 .fp-item .fp-ico{font-size:.9rem;}
@@ -483,15 +125,271 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 .fp-manual button{padding:6px 10px;background:var(--gold);color:#fff;border:none;border-radius:5px;font-size:.72rem;cursor:pointer;font-weight:600;}
 .fp-empty{padding:12px;text-align:center;color:var(--muted);font-size:.78rem;}
 
-@media(max-width:600px){
+/* ═══════════════════════════════
+   DESKTOP PLAYER
+═══════════════════════════════ */
+.player-main{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 30px;position:relative;overflow:hidden;}
+.player-main::before{content:'';position:absolute;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(139,107,44,.06) 0%,transparent 68%);pointer-events:none;}
+.now-playing{display:flex;flex-direction:column;align-items:center;gap:24px;width:100%;max-width:360px;}
+.vinyl-wrap{position:relative;width:220px;height:220px;}
+.vinyl-disc{width:220px;height:220px;border-radius:50%;background:repeating-conic-gradient(from 0deg,#2c2824 0deg,#1c1814 1.8deg,#2c2824 3.5deg);box-shadow:0 0 0 2px rgba(0,0,0,.1),0 24px 64px rgba(0,0,0,.25);animation:vspin 5s linear infinite;animation-play-state:paused;position:relative;}
+.vinyl-disc.spinning{animation-play-state:running;}
+@keyframes vspin{to{transform:rotate(360deg);}}
+.vinyl-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:78px;height:78px;border-radius:50%;background:radial-gradient(circle at 38% 38%,#d4b85a,#7a5818);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.vinyl-label img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.vinyl-label-icon{font-size:1.6rem;opacity:.5;}
+.vinyl-disc::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:8px;height:8px;border-radius:50%;background:var(--bg);z-index:1;}
+.track-meta{text-align:center;width:100%;}
+.track-title-big{font-family:'Instrument Sans',sans-serif;font-weight:600;font-size:1.35rem;color:var(--cream);margin-bottom:4px;line-height:1.3;white-space:nowrap;overflow:hidden;position:relative;}
+.track-title-big .marquee-inner{display:inline-block;white-space:nowrap;}
+.track-title-big.scrolling .marquee-inner{animation:marquee var(--marquee-duration,10s) linear infinite;}
+@keyframes marquee{0%{transform:translateX(0);}100%{transform:translateX(calc(-50% - 1.5em));}}
+.track-badge{font-family:'Space Mono',monospace;font-size:.68rem;color:var(--gold);text-transform:uppercase;letter-spacing:.14em;}
+.track-folder{font-size:.72rem;color:var(--muted);margin-top:5px;display:flex;align-items:center;justify-content:center;gap:4px;}
+.track-folder .tf-ico{font-size:.8rem;}
+.progress-section{width:100%;}
+.prog-times{display:flex;justify-content:space-between;font-family:'Space Mono',monospace;font-size:.68rem;color:var(--muted);margin-bottom:8px;}
+input[type="range"]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;width:100%;}
+input[type="range"]#seek-bar::-webkit-slider-runnable-track,
+input[type="range"]#seek-bar-m::-webkit-slider-runnable-track{height:3px;background:var(--border);border-radius:2px;}
+input[type="range"]#seek-bar::-webkit-slider-thumb,
+input[type="range"]#seek-bar-m::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--gold);margin-top:-5.5px;transition:box-shadow .2s;}
+input[type="range"]#seek-bar:hover::-webkit-slider-thumb,
+input[type="range"]#seek-bar-m:active::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(139,107,44,.15);}
+input[type="range"]#vol-bar::-webkit-slider-runnable-track{height:3px;background:var(--border);border-radius:2px;}
+input[type="range"]#vol-bar::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:var(--muted);margin-top:-4px;transition:background .2s;}
+input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);}
+.ctrl-row{display:flex;align-items:center;gap:14px;}
+.ctrl-btn{background:none;border:none;color:var(--muted);cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:color .2s;}
+.ctrl-btn:hover{color:var(--cream);}.ctrl-btn.on{color:var(--gold);}
+.play-btn{width:54px;height:54px;border-radius:50%;background:var(--gold);border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .1s,opacity .2s;padding-left:2px;}
+.play-btn:hover{opacity:.9;}.play-btn:active{transform:scale(.95);}
+.vol-row{display:flex;align-items:center;gap:10px;width:100%;}
+.vol-icon{color:var(--muted);min-width:16px;}
+/* Desktop user chip */
+.user-chip{position:fixed;top:calc(14px + var(--sat));right:calc(14px + var(--sar));display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:5px 14px 5px 7px;font-size:.78rem;color:var(--muted);cursor:pointer;z-index:10;transition:border-color .2s;box-shadow:0 2px 8px rgba(0,0,0,.06);}
+.user-chip:hover{border-color:var(--gold);}
+.user-av{width:22px;height:22px;border-radius:50%;background:var(--gold-dim);display:flex;align-items:center;justify-content:center;font-size:.68rem;color:#fff;font-weight:700;}
+
+/* ═══════════════════════════════
+   MOBILE LAYOUT  (≤ 640px)
+═══════════════════════════════ */
+@media(max-width:640px){
+
+  /* Hide desktop-only elements */
   .sidebar{display:none;}
-  .player-main{padding:24px 16px;}
+  .user-chip{display:none;}
+  .player-main::before{display:none;}
+
+  /* App becomes column, fills screen */
+  #app{flex-direction:column;position:relative;}
+
+  /* ── Mobile views ── */
+  .player-main{
+    padding:0;
+    /* takes remaining height above bottom-nav */
+    flex:1;
+    overflow:hidden;
+    display:none; /* toggled by JS */
+  }
+  .player-main.mob-active{display:flex;}
+
+  /* Mobile player inner */
+  .now-playing{
+    padding:20px 24px calc(16px + var(--sab));
+    gap:18px;
+    max-width:none;
+    width:100%;
+    height:100%;
+    justify-content:center;
+    overflow-y:auto;
+  }
+
+  /* Smaller vinyl on mobile */
+  .vinyl-wrap{width:180px;height:180px;}
+  .vinyl-disc{width:180px;height:180px;}
+  .vinyl-label{width:64px;height:64px;}
+
+  .track-title-big{font-size:1.15rem;}
+
+  /* Bigger touch targets for controls */
+  .ctrl-btn{padding:10px;}
+  .play-btn{width:60px;height:60px;}
+
+  /* Volume row smaller on mobile */
+  .vol-row{max-width:280px;}
+
+  /* ── Mobile Library Panel ── */
+  #mob-library{
+    display:none;
+    flex-direction:column;
+    flex:1;
+    overflow:hidden;
+    background:var(--bg);
+  }
+  #mob-library.mob-active{display:flex;}
+
+  .mob-lib-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:calc(12px + var(--sat)) 16px 10px;
+    background:var(--surface);
+    border-bottom:1px solid var(--border);
+    box-shadow:0 1px 6px rgba(0,0,0,.05);
+  }
+  .mob-lib-head h2{font-size:1rem;font-weight:600;}
+  .mob-lib-head .mob-head-right{display:flex;align-items:center;gap:8px;}
+
+  /* User avatar in mobile header */
+  .mob-user-av{
+    width:28px;height:28px;border-radius:50%;
+    background:var(--gold-dim);
+    display:flex;align-items:center;justify-content:center;
+    font-size:.72rem;color:#fff;font-weight:700;
+    cursor:pointer;border:1px solid var(--border);
+  }
+  .mob-icon-btn{
+    background:none;border:1px solid var(--border);border-radius:6px;
+    color:var(--muted);width:30px;height:30px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .mob-icon-btn:active{background:var(--gold-glow);}
+
+  /* Folder toggle in mobile */
+  .mob-folder-section{border-bottom:1px solid var(--border);background:var(--surface);}
+  .mob-folder-toggle{
+    display:flex;align-items:center;gap:8px;width:100%;
+    background:none;border:none;padding:8px 16px;
+    color:var(--cream);font-family:'Instrument Sans',sans-serif;font-size:.82rem;cursor:pointer;
+  }
+  .mob-folder-toggle .folder-name{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .mob-folder-toggle .chevron{color:var(--muted);font-size:.7rem;transition:transform .2s;}
+  .mob-folder-toggle.open .chevron{transform:rotate(180deg);}
+  .mob-folder-panel{display:none;max-height:200px;overflow-y:auto;background:var(--bg);border-top:1px solid var(--border);}
+  .mob-folder-panel.show{display:block;}
+
+  /* Mobile search */
+  .mob-search-wrap{padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--border);}
+  .mob-search-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:8px 14px;color:var(--cream);font-family:'Instrument Sans',sans-serif;font-size:.88rem;outline:none;}
+  .mob-search-input:focus{border-color:var(--gold);}
+  .mob-search-input::placeholder{color:var(--muted);}
+
+  /* Mobile track list */
+  #mob-track-list{flex:1;overflow-y:auto;padding:4px;}
+  #mob-track-list .track-item{padding:11px 14px;border-radius:10px;}
+  #mob-track-list .t-name{font-size:.9rem;}
+  #mob-track-list .t-ext{font-size:.7rem;}
+
+  /* ── Mini player (shows in Library view) ── */
+  .mini-player{
+    display:none;
+    align-items:center;gap:12px;
+    background:var(--surface);
+    border-top:1px solid var(--border);
+    padding:10px 14px;
+    box-shadow:0 -2px 12px rgba(0,0,0,.07);
+    cursor:pointer;
+    min-height:62px;
+  }
+  #mob-library.mob-active .mini-player{display:flex;}
+  .mini-disc{
+    width:40px;height:40px;border-radius:50%;flex-shrink:0;
+    background:repeating-conic-gradient(from 0deg,#2c2824 0deg,#1c1814 1.8deg,#2c2824 3.5deg);
+    box-shadow:0 2px 8px rgba(0,0,0,.2);
+    animation:vspin 5s linear infinite;animation-play-state:paused;
+    position:relative;display:flex;align-items:center;justify-content:center;
+  }
+  .mini-disc.spinning{animation-play-state:running;}
+  .mini-disc::after{content:'';position:absolute;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 38%,#d4b85a,#7a5818);}
+  .mini-info{flex:1;min-width:0;}
+  .mini-title{font-size:.88rem;font-weight:600;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .mini-title.idle{color:var(--muted);font-weight:400;}
+  .mini-folder{font-size:.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .mini-play-btn{
+    width:38px;height:38px;border-radius:50%;background:var(--gold);
+    border:none;color:#fff;cursor:pointer;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    transition:transform .1s;padding-left:1px;
+  }
+  .mini-play-btn:active{transform:scale(.92);}
+  .mini-next-btn{
+    width:32px;height:32px;border-radius:50%;background:none;
+    border:none;color:var(--muted);cursor:pointer;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .mini-next-btn:active{color:var(--gold);}
+
+  /* ── Bottom Navigation ── */
+  .mob-nav{
+    display:flex;
+    background:var(--surface);
+    border-top:1px solid var(--border);
+    box-shadow:0 -1px 10px rgba(0,0,0,.07);
+    padding-bottom:var(--sab);
+    flex-shrink:0;
+  }
+  .mob-nav-btn{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;padding:10px 6px;background:none;border:none;cursor:pointer;
+    color:var(--muted);font-family:'Instrument Sans',sans-serif;font-size:.68rem;
+    transition:color .15s;
+  }
+  .mob-nav-btn.active{color:var(--gold);}
+  .mob-nav-btn svg{transition:color .15s;}
+  .mob-nav-dot{width:4px;height:4px;border-radius:50%;background:var(--gold);margin-top:1px;opacity:0;transition:opacity .2s;}
+  .mob-nav-btn.active .mob-nav-dot{opacity:1;}
+
+  /* ── Mobile user menu overlay ── */
+  .mob-user-menu{
+    display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:400;
+  }
+  .mob-user-menu.open{display:block;}
+  .mob-user-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.3);}
+  .mob-user-sheet{
+    position:absolute;bottom:0;left:0;right:0;
+    background:var(--surface);border-radius:20px 20px 0 0;
+    padding:0 0 calc(24px + var(--sab));
+    animation:slideUp .3s ease;
+  }
+  @keyframes slideUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+  .mob-user-handle{width:36px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 16px;}
+  .mob-user-info{display:flex;align-items:center;gap:12px;padding:0 20px 16px;border-bottom:1px solid var(--border);}
+  .mob-user-big-av{width:44px;height:44px;border-radius:50%;background:var(--gold-dim);display:flex;align-items:center;justify-content:center;font-size:1rem;color:#fff;font-weight:700;}
+  .mob-user-details h3{font-size:.95rem;font-weight:600;color:var(--cream);}
+  .mob-user-details p{font-size:.75rem;color:var(--muted);}
+  .mob-user-actions{padding:8px 12px 0;}
+  .mob-user-action-btn{
+    display:flex;align-items:center;gap:12px;width:100%;
+    background:none;border:none;padding:12px 8px;
+    color:var(--cream);font-family:'Instrument Sans',sans-serif;font-size:.9rem;cursor:pointer;
+    border-radius:8px;transition:background .15s;
+  }
+  .mob-user-action-btn:active{background:var(--gold-glow);}
+  .mob-user-action-btn.danger{color:var(--danger);}
+
+  /* Swipe hint */
+  .swipe-hint{
+    position:absolute;bottom:80px;left:50%;transform:translateX(-50%);
+    font-size:.7rem;color:var(--muted);
+    opacity:0;transition:opacity 1s;pointer-events:none;white-space:nowrap;
+  }
+  .swipe-hint.show{opacity:1;}
+
+  /* Mobile seek bar larger touch area */
+  input[type="range"]#seek-bar-m::-webkit-slider-runnable-track{height:4px;}
+  input[type="range"]#seek-bar-m::-webkit-slider-thumb{width:18px;height:18px;margin-top:-7px;}
+
+}/* end @media mobile */
+
+/* Hide mobile elements on desktop */
+#mob-library,.mob-nav,.mini-player,.mob-user-menu,.swipe-hint{display:none;}
+@media(min-width:641px){
+  #mob-library,.mob-nav,.mini-player,.mob-user-menu,.swipe-hint{display:none!important;}
 }
 </style>
 </head>
 <body>
 
-<!-- ── Setup screen (first run) ───────────────────────────────────── -->
+<!-- ── Setup screen ── -->
 <div class="screen" id="setup-screen">
   <div class="screen-card">
     <div class="brand"></div>
@@ -512,7 +410,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
   </div>
 </div>
 
-<!-- ── Login screen ───────────────────────────────────────────────── -->
+<!-- ── Login screen ── -->
 <div class="screen" id="login-screen" style="display:none">
   <div class="screen-card">
     <div class="brand"></div>
@@ -531,21 +429,18 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
   </div>
 </div>
 
-<!-- ── Main app ───────────────────────────────────────────────────── -->
+<!-- ── Main app ── -->
 <div id="app">
 
-  <!-- Token expiry warning -->
-  <div class="token-warn" id="token-warn" onclick="silentRefresh()">
-    ⚠ 登入即將到期，點擊重新整理
-  </div>
+  <div class="token-warn" id="token-warn" onclick="silentRefresh()">⚠ 登入即將到期，點擊重新整理</div>
 
-  <!-- User chip -->
+  <!-- Desktop user chip -->
   <div class="user-chip" id="user-chip" onclick="signOut()" title="點擊登出">
     <div class="user-av" id="user-av">—</div>
     <span id="user-name">登出</span>
   </div>
 
-  <!-- Sidebar -->
+  <!-- ══ DESKTOP SIDEBAR ══ -->
   <aside class="sidebar">
     <div class="sidebar-top">
       <h2>音樂庫</h2>
@@ -578,20 +473,16 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
     </div>
     <div class="search-wrap">
       <input class="search-input" id="search-input" type="text"
-             placeholder="搜尋音樂..." oninput="filterTracks(this.value)">
+             placeholder="搜尋音樂..." oninput="filterTracks(this.value,'desktop')">
     </div>
     <div class="track-list" id="track-list">
-      <div class="list-state">
-        <div class="spinner"></div>載入中…
-      </div>
+      <div class="list-state"><div class="spinner"></div>載入中…</div>
     </div>
   </aside>
 
-  <!-- Player -->
-  <main class="player-main">
+  <!-- ══ DESKTOP PLAYER ══ -->
+  <main class="player-main mob-active" id="player-main">
     <div class="now-playing">
-
-      <!-- Vinyl record -->
       <div class="vinyl-wrap">
         <div class="vinyl-disc" id="vinyl-disc">
           <div class="vinyl-label" id="vinyl-label">
@@ -599,533 +490,643 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
           </div>
         </div>
       </div>
-
-      <!-- Track info -->
       <div class="track-meta">
         <div class="track-title-big" id="now-title"><span class="marquee-inner">選擇一首歌</span></div>
         <div class="track-badge" id="now-ext">— 雲端音樂播放器 —</div>
         <div class="track-folder" id="now-folder"><span class="tf-ico">📁</span><span id="now-folder-name"></span></div>
       </div>
-
-      <!-- Progress -->
       <div class="progress-section">
         <div class="prog-times">
           <span id="cur-time">0:00</span>
           <span id="dur-time">0:00</span>
         </div>
-        <input type="range" id="seek-bar" min="0" max="100" value="0" step="0.1"
-               oninput="seekAudio(this.value)">
+        <input type="range" id="seek-bar" min="0" max="100" value="0" step="0.1" oninput="seekAudio(this.value)">
       </div>
-
-      <!-- Controls -->
       <div class="ctrl-row">
-        <button class="ctrl-btn" id="shuffle-btn" onclick="toggleShuffle()" title="隨機">
+        <button class="ctrl-btn" id="shuffle-btn" onclick="toggleShuffle()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
             <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
           </svg>
         </button>
-        <button class="ctrl-btn" onclick="prevTrack()" title="上一首 (P)">
+        <button class="ctrl-btn" onclick="prevTrack()">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/>
           </svg>
         </button>
-        <button class="play-btn" id="play-btn" onclick="togglePlay()" title="播放/暫停 (Space)">
-          <svg id="play-ico" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5 3 19 12 5 21 5 3"/>
-          </svg>
-          <svg id="pause-ico" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="display:none">
-            <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
-          </svg>
+        <button class="play-btn" onclick="togglePlay()">
+          <svg id="play-ico" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <svg id="pause-ico" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
         </button>
-        <button class="ctrl-btn" onclick="nextTrack()" title="下一首 (N)">
+        <button class="ctrl-btn" onclick="nextTrack()">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
           </svg>
         </button>
-        <button class="ctrl-btn" id="repeat-btn" onclick="toggleRepeat()" title="重複">
+        <button class="ctrl-btn" id="repeat-btn" onclick="toggleRepeat()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
             <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
           </svg>
         </button>
       </div>
-
-      <!-- Volume -->
       <div class="vol-row">
-        <svg class="vol-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-        </svg>
-        <input type="range" id="vol-bar" min="0" max="100" value="80"
-               oninput="setVolume(this.value)">
-        <svg class="vol-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-        </svg>
+        <svg class="vol-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg>
+        <input type="range" id="vol-bar" min="0" max="100" value="80" oninput="setVolume(this.value)">
+        <svg class="vol-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
       </div>
-
-    </div><!-- /now-playing -->
+      <!-- Mobile-only seek bar duplicate (within player, larger touch target) -->
+      <div class="progress-section" id="mob-seek-section" style="display:none">
+        <div class="prog-times">
+          <span id="cur-time-m">0:00</span>
+          <span id="dur-time-m">0:00</span>
+        </div>
+        <input type="range" id="seek-bar-m" min="0" max="100" value="0" step="0.1" oninput="seekAudio(this.value)">
+      </div>
+    </div>
+    <!-- Swipe hint -->
+    <div class="swipe-hint" id="swipe-hint">← 左滑下一首・右滑上一首 →</div>
   </main>
+
+  <!-- ══ MOBILE LIBRARY PANEL ══ -->
+  <div id="mob-library">
+    <div class="mob-lib-head">
+      <h2>音樂庫</h2>
+      <div class="mob-head-right">
+        <button class="mob-icon-btn" onclick="loadFiles()" title="重新整理">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polyline points="23 4 23 10 17 10"/><line x1="4" y1="20" x2="21" y2="3"/>
+            <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+          </svg>
+        </button>
+        <div class="mob-user-av" id="mob-user-av" onclick="openUserMenu()">—</div>
+      </div>
+    </div>
+    <!-- Mobile folder section -->
+    <div class="mob-folder-section">
+      <button class="mob-folder-toggle" id="mob-folder-toggle" onclick="toggleMobFolderPanel()">
+        <span style="color:var(--gold);font-size:1rem;">📁</span>
+        <span class="folder-name" id="mob-folder-display">所有音樂</span>
+        <span class="chevron">▾</span>
+      </button>
+      <div class="mob-folder-panel" id="mob-folder-panel">
+        <input class="fp-search" id="mob-fp-search" placeholder="搜尋資料夾..." oninput="filterFolderListMob(this.value)"
+               style="width:calc(100% - 20px);margin:8px 10px 4px;">
+        <button class="fp-item active" id="mob-fp-all" onclick="selectFolder('','所有音樂')">📂 所有音樂</button>
+        <div class="fp-sep"></div>
+        <div id="mob-fp-list"><div class="fp-empty">載入中…</div></div>
+        <div class="fp-sep"></div>
+        <div class="fp-manual">
+          <input id="mob-fp-manual-id" placeholder="手動輸入資料夾 ID…">
+          <button onclick="applyManualFolderMob()">套用</button>
+        </div>
+      </div>
+    </div>
+    <!-- Mobile search -->
+    <div class="mob-search-wrap">
+      <input class="mob-search-input" type="text" id="mob-search-input"
+             placeholder="🔍  搜尋音樂..." oninput="filterTracks(this.value,'mobile')">
+    </div>
+    <!-- Mobile track list -->
+    <div class="track-list" id="mob-track-list">
+      <div class="list-state"><div class="spinner"></div>載入中…</div>
+    </div>
+    <!-- Mini player bar -->
+    <div class="mini-player" id="mini-player" onclick="switchMobView('player')">
+      <div class="mini-disc" id="mini-disc"></div>
+      <div class="mini-info">
+        <div class="mini-title idle" id="mini-title">尚未播放</div>
+        <div class="mini-folder" id="mini-folder"></div>
+      </div>
+      <button class="mini-next-btn" onclick="event.stopPropagation();prevTrack()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/>
+        </svg>
+      </button>
+      <button class="mini-play-btn" id="mini-play-btn" onclick="event.stopPropagation();togglePlay()">
+        <svg id="mini-play-ico" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg id="mini-pause-ico" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      </button>
+      <button class="mini-next-btn" onclick="event.stopPropagation();nextTrack()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══ MOBILE BOTTOM NAV ══ -->
+  <nav class="mob-nav" id="mob-nav">
+    <button class="mob-nav-btn active" id="nav-player" onclick="switchMobView('player')">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="3"/>
+        <line x1="12" y1="2" x2="12" y2="5"/>
+        <line x1="12" y1="19" x2="12" y2="22"/>
+        <line x1="2" y1="12" x2="5" y2="12"/>
+        <line x1="19" y1="12" x2="22" y2="12"/>
+      </svg>
+      播放器
+      <div class="mob-nav-dot"></div>
+    </button>
+    <button class="mob-nav-btn" id="nav-library" onclick="switchMobView('library')">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="8" y1="6" x2="21" y2="6"/>
+        <line x1="8" y1="12" x2="21" y2="12"/>
+        <line x1="8" y1="18" x2="21" y2="18"/>
+        <line x1="3" y1="6" x2="3.01" y2="6"/>
+        <line x1="3" y1="12" x2="3.01" y2="12"/>
+        <line x1="3" y1="18" x2="3.01" y2="18"/>
+      </svg>
+      音樂庫
+      <div class="mob-nav-dot"></div>
+    </button>
+  </nav>
+
+  <!-- ══ MOBILE USER MENU ══ -->
+  <div class="mob-user-menu" id="mob-user-menu">
+    <div class="mob-user-backdrop" onclick="closeUserMenu()"></div>
+    <div class="mob-user-sheet">
+      <div class="mob-user-handle"></div>
+      <div class="mob-user-info">
+        <div class="mob-user-big-av" id="mob-user-big-av">—</div>
+        <div class="mob-user-details">
+          <h3 id="mob-user-name-sheet">—</h3>
+          <p>Drive Music</p>
+        </div>
+      </div>
+      <div class="mob-user-actions">
+        <button class="mob-user-action-btn" onclick="closeUserMenu();loadFiles()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/><line x1="4" y1="20" x2="21" y2="3"/>
+            <polyline points="21 16 21 21 16 21"/>
+          </svg>
+          重新整理音樂庫
+        </button>
+        <button class="mob-user-action-btn" onclick="closeUserMenu();resetClientId()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+          </svg>
+          重設 Client ID
+        </button>
+        <button class="mob-user-action-btn danger" onclick="signOut()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          登出
+        </button>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /app -->
 
-<!-- Hidden audio element -->
 <audio id="audio" preload="none"></audio>
-
-<!-- Toast -->
 <div class="toast" id="toast"></div>
-
-<!-- Google Identity Services -->
 <script src="https://accounts.google.com/gsi/client"></script>
-
 <script>
-/* ── Config ─────────────────────────────────────────────────── */
+/* ── Config ── */
 let CLIENT_ID = localStorage.getItem('drivemusic_cid') || '';
-const SCOPES   = 'https://www.googleapis.com/auth/drive.readonly';
-const AUDIO_MIMES = [
-  'audio/mpeg','audio/mp3','audio/mp4','audio/flac',
-  'audio/wav','audio/x-wav','audio/ogg','audio/aac',
-  'audio/x-m4a','audio/webm','audio/x-flac','audio/opus'
-];
+const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+const AUDIO_MIMES = ['audio/mpeg','audio/mp3','audio/mp4','audio/flac','audio/wav','audio/x-wav','audio/ogg','audio/aac','audio/x-m4a','audio/webm','audio/x-flac','audio/opus'];
 
-/* ── State ──────────────────────────────────────────────────── */
-let tokenClient = null;
-let accessToken = null;
-let tokenExpiry = 0;
-let allTracks   = [];
-let visibleTracks = [];
-let currentIdx  = -1;
-let isShuffle   = false;
-let isRepeat    = false;
-let currentFolderId   = localStorage.getItem('drivemusic_folder') || '';
-let currentFolderName = localStorage.getItem('drivemusic_folder_name') || '所有音樂';
-let allFolders = [];
+/* ── State ── */
+let tokenClient=null,accessToken=null,tokenExpiry=0;
+let allTracks=[],visibleTracks=[],currentIdx=-1;
+let isShuffle=false,isRepeat=false;
+let currentFolderId=localStorage.getItem('drivemusic_folder')||'';
+let currentFolderName=localStorage.getItem('drivemusic_folder_name')||'所有音樂';
+let allFolders=[];
+let currentBlobUrl=null;
+let isMobile=()=>window.innerWidth<=640;
 
-const audio = document.getElementById('audio');
+const audio=document.getElementById('audio');
 
-/* ── Init ───────────────────────────────────────────────────── */
-function init() {
-  if (!CLIENT_ID) {
-    show('setup-screen');
-  } else {
-    show('login-screen');
-    initAuth();
-  }
+/* ── Init ── */
+function init(){
+  if(!CLIENT_ID){show('setup-screen');}
+  else{show('login-screen');initAuth();}
 }
-
-function show(id) {
-  ['setup-screen','login-screen','app'].forEach(s => {
-    const el = document.getElementById(s);
-    if (el) el.style.display = s === id ? (s === 'app' ? 'flex' : 'flex') : 'none';
+function show(id){
+  ['setup-screen','login-screen','app'].forEach(s=>{
+    const el=document.getElementById(s);
+    if(el)el.style.display=s===id?(s==='app'?'flex':'flex'):'none';
   });
-  if (id === 'app') document.getElementById('app').style.display = 'flex';
 }
-
-function saveClientId() {
-  const val = document.getElementById('client-id-input').value.trim();
-  if (!val.includes('apps.googleusercontent.com')) {
-    showToast('請輸入有效的 Client ID'); return;
-  }
-  CLIENT_ID = val;
-  localStorage.setItem('drivemusic_cid', val);
-  document.getElementById('setup-screen').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
+function saveClientId(){
+  const val=document.getElementById('client-id-input').value.trim();
+  if(!val.includes('apps.googleusercontent.com')){showToast('請輸入有效的 Client ID');return;}
+  CLIENT_ID=val;localStorage.setItem('drivemusic_cid',val);
+  document.getElementById('setup-screen').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
   initAuth();
 }
-
-function resetClientId() {
-  localStorage.removeItem('drivemusic_cid');
-  location.reload();
+function resetClientId(){localStorage.removeItem('drivemusic_cid');location.reload();}
+function initAuth(){
+  tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:onToken});
 }
-
-function initAuth() {
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: onToken
-  });
-}
-
-function onToken(resp) {
-  if (resp.error) { showToast('登入失敗：' + resp.error); return; }
-  accessToken = resp.access_token;
-  tokenExpiry = Date.now() + (resp.expires_in - 120) * 1000;
-
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('setup-screen').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-
-  audio.volume = 0.8;
+function onToken(resp){
+  if(resp.error){showToast('登入失敗：'+resp.error);return;}
+  accessToken=resp.access_token;
+  tokenExpiry=Date.now()+(resp.expires_in-120)*1000;
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('setup-screen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  audio.volume=0.8;
   scheduleTokenRefresh(resp.expires_in);
-  document.getElementById('folder-display').textContent = currentFolderName;
+  ['folder-display','mob-folder-display'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.textContent=currentFolderName;
+  });
   loadFolders();
   loadFiles();
   fetchUserInfo();
+  // Show swipe hint once
+  if(!localStorage.getItem('swipe_hint_shown')&&isMobile()){
+    setTimeout(()=>{
+      const h=document.getElementById('swipe-hint');
+      if(h){h.classList.add('show');setTimeout(()=>h.classList.remove('show'),3000);}
+      localStorage.setItem('swipe_hint_shown','1');
+    },2000);
+  }
+}
+function signIn(){if(!tokenClient)initAuth();tokenClient.requestAccessToken({prompt:'consent'});}
+function signOut(){
+  if(!confirm('確定要登出嗎？'))return;
+  if(accessToken)google.accounts.oauth2.revoke(accessToken,()=>{});
+  accessToken=null;allTracks=[];currentIdx=-1;
+  audio.pause();audio.src='';setPlaying(false);
+  document.getElementById('app').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+  closeUserMenu();
+}
+function scheduleTokenRefresh(expiresIn){
+  const ms=(expiresIn-300)*1000;
+  setTimeout(()=>document.getElementById('token-warn').style.display='block',ms);
+  setTimeout(silentRefresh,ms+60000);
+}
+function silentRefresh(){
+  if(tokenClient)tokenClient.requestAccessToken({prompt:''});
+  document.getElementById('token-warn').style.display='none';
+}
+async function fetchUserInfo(){
+  try{
+    const r=await apiFetch('https://www.googleapis.com/oauth2/v1/userinfo');
+    const initial=(r.name||'U')[0].toUpperCase();
+    ['user-av','mob-user-av','mob-user-big-av'].forEach(id=>{
+      const el=document.getElementById(id);if(el)el.textContent=initial;
+    });
+    const nameEl=document.getElementById('user-name');if(nameEl)nameEl.textContent=r.name||'登出';
+    const sheetName=document.getElementById('mob-user-name-sheet');if(sheetName)sheetName.textContent=r.name||'';
+  }catch(_){}
 }
 
-function signIn() {
-  if (!tokenClient) initAuth();
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+/* ── Mobile view switching ── */
+let mobView='player';
+function switchMobView(view){
+  mobView=view;
+  const player=document.getElementById('player-main');
+  const library=document.getElementById('mob-library');
+  const navPlayer=document.getElementById('nav-player');
+  const navLibrary=document.getElementById('nav-library');
+  if(view==='player'){
+    player.classList.add('mob-active');
+    library.classList.remove('mob-active');
+    navPlayer.classList.add('active');
+    navLibrary.classList.remove('active');
+  }else{
+    player.classList.remove('mob-active');
+    library.classList.add('mob-active');
+    navPlayer.classList.remove('active');
+    navLibrary.classList.add('active');
+  }
 }
 
-function signOut() {
-  if (!confirm('確定要登出嗎？')) return;
-  if (accessToken) google.accounts.oauth2.revoke(accessToken, ()=>{});
-  accessToken = null; allTracks = []; currentIdx = -1;
-  audio.pause(); audio.src = '';
-  setPlaying(false);
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
+/* ── Mobile user menu ── */
+function openUserMenu(){document.getElementById('mob-user-menu').classList.add('open');}
+function closeUserMenu(){document.getElementById('mob-user-menu').classList.remove('open');}
+
+/* ── Mobile folder panel ── */
+function toggleMobFolderPanel(){
+  const panel=document.getElementById('mob-folder-panel');
+  const toggle=document.getElementById('mob-folder-toggle');
+  const isOpen=panel.classList.contains('show');
+  panel.classList.toggle('show',!isOpen);
+  toggle.classList.toggle('open',!isOpen);
 }
 
-function scheduleTokenRefresh(expiresIn) {
-  const ms = (expiresIn - 300) * 1000;
-  setTimeout(() => {
-    document.getElementById('token-warn').style.display = 'block';
-  }, ms);
-  setTimeout(silentRefresh, ms + 60000);
-}
-
-function silentRefresh() {
-  if (!tokenClient) return;
-  tokenClient.requestAccessToken({ prompt: '' });
-  document.getElementById('token-warn').style.display = 'none';
-}
-
-async function fetchUserInfo() {
-  try {
-    const r = await apiFetch('https://www.googleapis.com/oauth2/v1/userinfo');
-    document.getElementById('user-av').textContent = (r.name||'U')[0].toUpperCase();
-    document.getElementById('user-name').textContent = r.name || '登出';
-  } catch(_){}
-}
-
-/* ── Drive API ──────────────────────────────────────────────── */
-async function loadFiles() {
-  document.getElementById('track-list').innerHTML =
-    '<div class="list-state"><div class="spinner"></div>掃描音樂檔案中…</div>';
-
-  try {
-    const mq = AUDIO_MIMES.map(m=>`mimeType='${m}'`).join(' or ');
-    let q  = `(${mq}) and trashed=false`;
-    if (currentFolderId) q += ` and '${currentFolderId}' in parents`;
-    let files = [], pageToken = null;
-
-    do {
-      const p = new URLSearchParams({
-        q, pageSize:'1000', orderBy:'name',
-        fields:'nextPageToken,files(id,name,mimeType,size,thumbnailLink)'
-      });
-      if (pageToken) p.set('pageToken', pageToken);
-      const data = await apiFetch('https://www.googleapis.com/drive/v3/files?' + p);
-      files = files.concat(data.files || []);
-      pageToken = data.nextPageToken;
-    } while (pageToken);
-
-    allTracks = files;
-    visibleTracks = files;
-
-    if (!files.length) {
-      document.getElementById('track-list').innerHTML =
-        '<div class="list-state">🎵<br><br>找不到音樂檔案<br><small>支援：MP3、FLAC、WAV、OGG、M4A、AAC</small></div>';
-    } else {
+/* ── Drive API ── */
+async function loadFiles(){
+  ['track-list','mob-track-list'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.innerHTML='<div class="list-state"><div class="spinner"></div>掃描音樂檔案中…</div>';
+  });
+  try{
+    const mq=AUDIO_MIMES.map(m=>`mimeType='${m}'`).join(' or ');
+    let q=`(${mq}) and trashed=false`;
+    if(currentFolderId)q+=` and '${currentFolderId}' in parents`;
+    let files=[],pageToken=null;
+    do{
+      const p=new URLSearchParams({q,pageSize:'1000',orderBy:'name',fields:'nextPageToken,files(id,name,mimeType,size,thumbnailLink)'});
+      if(pageToken)p.set('pageToken',pageToken);
+      const data=await apiFetch('https://www.googleapis.com/drive/v3/files?'+p);
+      files=files.concat(data.files||[]);
+      pageToken=data.nextPageToken;
+    }while(pageToken);
+    allTracks=files;visibleTracks=files;
+    if(!files.length){
+      const msg='<div class="list-state">🎵<br><br>找不到音樂檔案<br><small>支援：MP3、FLAC、WAV、OGG、M4A、AAC</small></div>';
+      ['track-list','mob-track-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=msg;});
+    }else{
       renderList(allTracks);
       showToast(`找到 ${allTracks.length} 首歌曲`);
     }
-  } catch(e) {
-    console.error(e);
-    document.getElementById('track-list').innerHTML =
-      `<div class="list-state" style="color:#b03030">載入失敗<br><small>${e.message}</small><br><br><button onclick="loadFiles()" style="color:var(--gold);background:none;border:none;cursor:pointer;font-size:.8rem">重試</button></div>`;
+  }catch(e){
+    const msg=`<div class="list-state" style="color:#b03030">載入失敗<br><small>${e.message}</small><br><br><button onclick="loadFiles()" style="color:var(--gold);background:none;border:none;cursor:pointer;font-size:.8rem">重試</button></div>`;
+    ['track-list','mob-track-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=msg;});
   }
 }
-
-async function apiFetch(url) {
-  const r = await fetch(url, { headers:{ Authorization:`Bearer ${accessToken}` }});
-  if (!r.ok) throw new Error('API ' + r.status);
+async function apiFetch(url){
+  const r=await fetch(url,{headers:{Authorization:`Bearer ${accessToken}`}});
+  if(!r.ok)throw new Error('API '+r.status);
   return r.json();
 }
 
-/* ── Render list ────────────────────────────────────────────── */
-function renderList(tracks) {
-  visibleTracks = tracks;
-  const el = document.getElementById('track-list');
-  if (!tracks.length) {
-    el.innerHTML = '<div class="list-state">沒有符合的結果</div>'; return;
-  }
-  el.innerHTML = tracks.map((t, vi) => {
-    const gi = allTracks.indexOf(t);
-    const active = gi === currentIdx;
-    const name = t.name.replace(/\.[^.]+$/,'');
-    const ext  = t.name.split('.').pop();
-    return `
-      <div class="track-item${active?' active':''}" id="ti-${gi}" onclick="playTrack(${gi})">
-        <div class="t-num">
-          ${active
-            ? '<div class="eq-anim"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>'
-            : (gi+1)}
-        </div>
-        <div class="t-info">
-          <div class="t-name" title="${esc(t.name)}">${esc(name)}</div>
-          <div class="t-ext">${esc(ext)}</div>
-        </div>
-      </div>`;
+/* ── Render list ── */
+function renderList(tracks){
+  visibleTracks=tracks;
+  const makeHtml=(tracks)=>tracks.map(t=>{
+    const gi=allTracks.indexOf(t);
+    const active=gi===currentIdx;
+    const name=t.name.replace(/\.[^.]+$/,'');
+    const ext=t.name.split('.').pop();
+    return `<div class="track-item${active?' active':''}" id="ti-${gi}" onclick="playTrack(${gi})">
+      <div class="t-num">${active?'<div class="eq-anim"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>':(gi+1)}</div>
+      <div class="t-info">
+        <div class="t-name" title="${esc(t.name)}">${esc(name)}</div>
+        <div class="t-ext">${esc(ext)}</div>
+      </div>
+    </div>`;
   }).join('');
+  const el=document.getElementById('track-list');
+  const mel=document.getElementById('mob-track-list');
+  const html=tracks.length?makeHtml(tracks):'<div class="list-state">沒有符合的結果</div>';
+  if(el)el.innerHTML=html;
+  if(mel)mel.innerHTML=html;
+}
+function filterTracks(q,src){
+  // sync both search inputs
+  if(src==='desktop'){const m=document.getElementById('mob-search-input');if(m&&m.value!==q)m.value=q;}
+  else{const d=document.getElementById('search-input');if(d&&d.value!==q)d.value=q;}
+  const lq=q.toLowerCase();
+  renderList(lq?allTracks.filter(t=>t.name.toLowerCase().includes(lq)):allTracks);
 }
 
-function filterTracks(q) {
-  const lq = q.toLowerCase();
-  renderList(lq ? allTracks.filter(t=>t.name.toLowerCase().includes(lq)) : allTracks);
+/* ── Folder management ── */
+async function loadFolders(){
+  try{
+    let folders=[],pageToken=null;
+    do{
+      const p=new URLSearchParams({q:"mimeType='application/vnd.google-apps.folder' and trashed=false",pageSize:'1000',orderBy:'name',fields:'nextPageToken,files(id,name)'});
+      if(pageToken)p.set('pageToken',pageToken);
+      const data=await apiFetch('https://www.googleapis.com/drive/v3/files?'+p);
+      folders=folders.concat(data.files||[]);
+      pageToken=data.nextPageToken;
+    }while(pageToken);
+    allFolders=folders;
+    renderFolderList(folders);
+  }catch(e){
+    ['fp-list','mob-fp-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<div class="fp-empty">載入資料夾失敗</div>';});
+  }
 }
+function renderFolderList(folders){
+  const makeHtml=(folders)=>folders.length
+    ?folders.map(f=>{
+      const active=f.id===currentFolderId?' active':'';
+      return `<button class="fp-item${active}" onclick="selectFolder('${esc(f.id)}','${esc(f.name)}')"><span class="fp-ico">📁</span>${esc(f.name)}</button>`;
+    }).join('')
+    :'<div class="fp-empty">沒有資料夾</div>';
+  const html=makeHtml(folders);
+  ['fp-list','mob-fp-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=html;});
+}
+function selectFolder(id,name){
+  currentFolderId=id;
+  currentFolderName=name||'所有音樂';
+  localStorage.setItem('drivemusic_folder',id);
+  localStorage.setItem('drivemusic_folder_name',currentFolderName);
+  ['folder-display','mob-folder-display'].forEach(elId=>{
+    const el=document.getElementById(elId);if(el)el.textContent=currentFolderName;
+  });
+  document.getElementById('fp-all').classList.toggle('active',!id);
+  const mobAll=document.getElementById('mob-fp-all');if(mobAll)mobAll.classList.toggle('active',!id);
+  renderFolderList(allFolders.filter(f=>{
+    const sq=document.getElementById('fp-search').value||document.getElementById('mob-fp-search').value||'';
+    return !sq||f.name.toLowerCase().includes(sq.toLowerCase());
+  }));
+  // Close panels
+  ['folder-panel','mob-folder-panel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show');});
+  ['folder-toggle','mob-folder-toggle'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('open');});
+  currentIdx=-1;
+  loadFiles();
+  showToast(`資料夾：${currentFolderName}`);
+}
+function applyManualFolder(){
+  const id=document.getElementById('fp-manual-id').value.trim();
+  if(!id){showToast('請輸入資料夾 ID');return;}
+  selectFolder(id,'自訂資料夾');
+  document.getElementById('fp-manual-id').value='';
+}
+function applyManualFolderMob(){
+  const id=document.getElementById('mob-fp-manual-id').value.trim();
+  if(!id){showToast('請輸入資料夾 ID');return;}
+  selectFolder(id,'自訂資料夾');
+  document.getElementById('mob-fp-manual-id').value='';
+}
+function toggleFolderPanel(){
+  const panel=document.getElementById('folder-panel');
+  const toggle=document.getElementById('folder-toggle');
+  const isOpen=panel.classList.contains('show');
+  panel.classList.toggle('show',!isOpen);
+  toggle.classList.toggle('open',!isOpen);
+}
+function filterFolderList(q){
+  const lq=q.toLowerCase();
+  renderFolderList(lq?allFolders.filter(f=>f.name.toLowerCase().includes(lq)):allFolders);
+}
+function filterFolderListMob(q){filterFolderList(q);}
 
-/* ── Playback ───────────────────────────────────────────────── */
-let currentBlobUrl = null;
-
-async function playTrack(idx) {
-  if (idx < 0 || idx >= allTracks.length) return;
-  currentIdx = idx;
-  const t = allTracks[idx];
-
-  /* Update now-playing UI */
-  const name = t.name.replace(/\.[^.]+$/,'');
-  const ext  = (t.name.split('.').pop()||'audio').toUpperCase();
-  setupMarquee('now-title', name);
-  document.getElementById('now-ext').textContent   = ext;
-  document.getElementById('now-folder-name').textContent = currentFolderName;
-  document.title = `♪ ${name}`;
-
-  const label = document.getElementById('vinyl-label');
-  label.innerHTML = t.thumbnailLink
-    ? `<img src="${t.thumbnailLink}" alt="">`
-    : '<span class="vinyl-label-icon">♪</span>';
-
+/* ── Playback ── */
+async function playTrack(idx){
+  if(idx<0||idx>=allTracks.length)return;
+  currentIdx=idx;
+  const t=allTracks[idx];
+  const name=t.name.replace(/\.[^.]+$/,'');
+  const ext=(t.name.split('.').pop()||'audio').toUpperCase();
+  setupMarquee('now-title',name);
+  document.getElementById('now-ext').textContent=ext;
+  document.getElementById('now-folder-name').textContent=currentFolderName;
+  document.title=`♪ ${name}`;
+  // Mini player update
+  const mt=document.getElementById('mini-title');
+  if(mt){mt.textContent=name;mt.classList.remove('idle');}
+  const mf=document.getElementById('mini-folder');
+  if(mf)mf.textContent=currentFolderName;
+  const label=document.getElementById('vinyl-label');
+  label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`: '<span class="vinyl-label-icon">♪</span>';
   renderList(visibleTracks);
-
-  /* Scroll active item into view */
   setTimeout(()=>{
-    const el = document.getElementById(`ti-${idx}`);
-    if (el) el.scrollIntoView({ behavior:'smooth', block:'nearest' });
-  }, 50);
-
-  /* Release previous blob URL to free memory */
-  if (currentBlobUrl) {
-    URL.revokeObjectURL(currentBlobUrl);
-    currentBlobUrl = null;
-  }
-
-  /* Fetch audio via Authorization header then create blob URL
-     — fixes CORS / format errors on GitHub Pages */
-  try {
+    ['ti-'+idx].forEach(id=>{
+      // scroll in both lists
+      document.querySelectorAll(`#ti-${idx}`).forEach(el=>el.scrollIntoView({behavior:'smooth',block:'nearest'}));
+    });
+  },50);
+  if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
+  try{
     showToast(`載入中：${name}`);
-    const resp = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${t.id}?alt=media`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-    const blob = await resp.blob();
-    currentBlobUrl = URL.createObjectURL(blob);
-    audio.src = currentBlobUrl;
+    const resp=await fetch(`https://www.googleapis.com/drive/v3/files/${t.id}?alt=media`,{headers:{Authorization:`Bearer ${accessToken}`}});
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    const blob=await resp.blob();
+    currentBlobUrl=URL.createObjectURL(blob);
+    audio.src=currentBlobUrl;
     audio.play().catch(()=>showToast('播放錯誤'));
-  } catch(e) {
-    console.error('playTrack fetch error:', e);
-    showToast('載入失敗：' + e.message);
-    setTimeout(nextTrack, 2000);
+  }catch(e){
+    console.error('playTrack fetch error:',e);
+    showToast('載入失敗：'+e.message);
+    setTimeout(nextTrack,2000);
   }
 }
-
-function togglePlay() {
-  if (currentIdx === -1 && allTracks.length) { playTrack(0); return; }
-  if (audio.paused) audio.play().catch(()=>{});
-  else audio.pause();
+function togglePlay(){
+  if(currentIdx===-1&&allTracks.length){playTrack(0);return;}
+  if(audio.paused)audio.play().catch(()=>{});else audio.pause();
+}
+function nextTrack(){
+  if(!allTracks.length)return;
+  if(isShuffle){playTrack(Math.floor(Math.random()*allTracks.length));return;}
+  playTrack((currentIdx+1)%allTracks.length);
+}
+function prevTrack(){
+  if(!allTracks.length)return;
+  if(audio.currentTime>3){audio.currentTime=0;return;}
+  playTrack((currentIdx-1+allTracks.length)%allTracks.length);
+}
+function seekAudio(v){if(audio.duration)audio.currentTime=(v/100)*audio.duration;}
+function setVolume(v){audio.volume=v/100;}
+function toggleShuffle(){
+  isShuffle=!isShuffle;
+  document.getElementById('shuffle-btn').classList.toggle('on',isShuffle);
+  showToast(isShuffle?'隨機播放：開':'隨機播放：關');
+}
+function toggleRepeat(){
+  isRepeat=!isRepeat;audio.loop=isRepeat;
+  document.getElementById('repeat-btn').classList.toggle('on',isRepeat);
+  showToast(isRepeat?'重複播放：開':'重複播放：關');
+}
+function setPlaying(p){
+  ['play-ico','mini-play-ico'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=p?'none':'block';});
+  ['pause-ico','mini-pause-ico'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=p?'block':'none';});
+  const v=document.getElementById('vinyl-disc');
+  p?v.classList.add('spinning'):v.classList.remove('spinning');
+  const md=document.getElementById('mini-disc');
+  if(md){p?md.classList.add('spinning'):md.classList.remove('spinning');}
 }
 
-function nextTrack() {
-  if (!allTracks.length) return;
-  if (isShuffle) { playTrack(Math.floor(Math.random() * allTracks.length)); return; }
-  playTrack((currentIdx + 1) % allTracks.length);
-}
-
-function prevTrack() {
-  if (!allTracks.length) return;
-  if (audio.currentTime > 3) { audio.currentTime = 0; return; }
-  playTrack((currentIdx - 1 + allTracks.length) % allTracks.length);
-}
-
-function seekAudio(v) {
-  if (audio.duration) audio.currentTime = (v/100) * audio.duration;
-}
-
-function setVolume(v) { audio.volume = v/100; }
-
-function toggleShuffle() {
-  isShuffle = !isShuffle;
-  document.getElementById('shuffle-btn').classList.toggle('on', isShuffle);
-  showToast(isShuffle ? '隨機播放：開' : '隨機播放：關');
-}
-
-function toggleRepeat() {
-  isRepeat = !isRepeat;
-  audio.loop = isRepeat;
-  document.getElementById('repeat-btn').classList.toggle('on', isRepeat);
-  showToast(isRepeat ? '重複播放：開' : '重複播放：關');
-}
-
-function setPlaying(playing) {
-  document.getElementById('play-ico').style.display  = playing ? 'none'  : 'block';
-  document.getElementById('pause-ico').style.display = playing ? 'block' : 'none';
-  const v = document.getElementById('vinyl-disc');
-  playing ? v.classList.add('spinning') : v.classList.remove('spinning');
-}
-
-/* ── Audio events ───────────────────────────────────────────── */
-audio.addEventListener('play',  () => setPlaying(true));
-audio.addEventListener('pause', () => setPlaying(false));
-
-audio.addEventListener('timeupdate', () => {
-  if (!audio.duration) return;
-  const pct = (audio.currentTime / audio.duration) * 100;
-  document.getElementById('seek-bar').value = pct;
-  document.getElementById('cur-time').textContent = fmt(audio.currentTime);
+/* ── Audio events ── */
+audio.addEventListener('play',()=>setPlaying(true));
+audio.addEventListener('pause',()=>setPlaying(false));
+audio.addEventListener('timeupdate',()=>{
+  if(!audio.duration)return;
+  const pct=(audio.currentTime/audio.duration)*100;
+  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
+  const t=fmt(audio.currentTime);
+  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
 });
-
-audio.addEventListener('loadedmetadata', () => {
-  document.getElementById('dur-time').textContent = fmt(audio.duration);
+audio.addEventListener('loadedmetadata',()=>{
+  const t=fmt(audio.duration);
+  ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
 });
+audio.addEventListener('ended',()=>{if(!isRepeat)nextTrack();});
+audio.addEventListener('error',()=>{showToast('播放錯誤，切換下一首…');setTimeout(nextTrack,1500);});
 
-audio.addEventListener('ended', () => {
-  if (!isRepeat) nextTrack();
-});
+/* ── Swipe gestures on player (mobile) ── */
+let _sx=null,_sy=null;
+document.getElementById('player-main').addEventListener('touchstart',e=>{
+  _sx=e.touches[0].clientX;_sy=e.touches[0].clientY;
+},{passive:true});
+document.getElementById('player-main').addEventListener('touchend',e=>{
+  if(_sx===null)return;
+  const dx=e.changedTouches[0].clientX-_sx;
+  const dy=e.changedTouches[0].clientY-_sy;
+  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>48){
+    dx<0?nextTrack():prevTrack();
+  }
+  _sx=null;_sy=null;
+},{passive:true});
 
-audio.addEventListener('error', () => {
-  showToast('播放錯誤，切換下一首…');
-  setTimeout(nextTrack, 1500);
-});
-
-/* ── Keyboard shortcuts ─────────────────────────────────────── */
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
-  switch(e.code) {
-    case 'Space':       e.preventDefault(); togglePlay(); break;
-    case 'ArrowRight':  audio.currentTime = Math.min(audio.currentTime+10, audio.duration||0); break;
-    case 'ArrowLeft':   audio.currentTime = Math.max(audio.currentTime-10, 0); break;
-    case 'ArrowUp':     audio.volume = Math.min(audio.volume+.1,1); document.getElementById('vol-bar').value = audio.volume*100; break;
-    case 'ArrowDown':   audio.volume = Math.max(audio.volume-.1,0); document.getElementById('vol-bar').value = audio.volume*100; break;
-    case 'KeyN':        nextTrack(); break;
-    case 'KeyP':        prevTrack(); break;
+/* ── Keyboard shortcuts ── */
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  switch(e.code){
+    case 'Space':      e.preventDefault();togglePlay();break;
+    case 'ArrowRight': audio.currentTime=Math.min(audio.currentTime+10,audio.duration||0);break;
+    case 'ArrowLeft':  audio.currentTime=Math.max(audio.currentTime-10,0);break;
+    case 'ArrowUp':    audio.volume=Math.min(audio.volume+.1,1);document.getElementById('vol-bar').value=audio.volume*100;break;
+    case 'ArrowDown':  audio.volume=Math.max(audio.volume-.1,0);document.getElementById('vol-bar').value=audio.volume*100;break;
+    case 'KeyN':       nextTrack();break;
+    case 'KeyP':       prevTrack();break;
   }
 });
-/* ── Marquee ────────────────────────────────────────────────── */
-function setupMarquee(elId, text) {
-  const wrap = document.getElementById(elId);
-  const inner = wrap.querySelector('.marquee-inner');
-  if (!inner) { wrap.textContent = text; return; }
+
+/* ── Marquee ── */
+function setupMarquee(elId,text){
+  const wrap=document.getElementById(elId);
+  const inner=wrap.querySelector('.marquee-inner');
+  if(!inner){wrap.textContent=text;return;}
   wrap.classList.remove('scrolling');
-  inner.textContent = text;
-  /* Wait one frame so layout is computed */
-  requestAnimationFrame(() => {
-    const textW = inner.scrollWidth;
-    const wrapW = wrap.clientWidth;
-    if (textW > wrapW) {
-      /* Duplicate text for seamless loop */
-      inner.innerHTML = esc(text) + '&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;' + esc(text);
-      const speed = 40; /* pixels per second */
-      const dur = (inner.scrollWidth / 2 + 48) / speed;
-      wrap.style.setProperty('--marquee-duration', dur + 's');
+  inner.textContent=text;
+  requestAnimationFrame(()=>{
+    if(inner.scrollWidth>wrap.clientWidth){
+      inner.innerHTML=esc(text)+'&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;'+esc(text);
+      const dur=(inner.scrollWidth/2+48)/40;
+      wrap.style.setProperty('--marquee-duration',dur+'s');
       wrap.classList.add('scrolling');
     }
   });
 }
 
-/* ── Utilities ──────────────────────────────────────────────── */
-function fmt(s) {
-  if (!isFinite(s)) return '0:00';
-  return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
-}
-
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-let _tt;
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(_tt);
-  _tt = setTimeout(() => t.classList.remove('show'), 2500);
-}
-
-/* ── Folder management ──────────────────────────────────────── */
-async function loadFolders() {
-  try {
-    let folders = [], pageToken = null;
-    do {
-      const p = new URLSearchParams({
-        q: "mimeType='application/vnd.google-apps.folder' and trashed=false",
-        pageSize:'1000', orderBy:'name',
-        fields:'nextPageToken,files(id,name)'
-      });
-      if (pageToken) p.set('pageToken', pageToken);
-      const data = await apiFetch('https://www.googleapis.com/drive/v3/files?' + p);
-      folders = folders.concat(data.files || []);
-      pageToken = data.nextPageToken;
-    } while (pageToken);
-    allFolders = folders;
-    renderFolderList(folders);
-  } catch(e) {
-    console.error('loadFolders error:', e);
-    document.getElementById('fp-list').innerHTML = '<div class="fp-empty">載入資料夾失敗</div>';
+/* ── Responsive: show/hide mobile seek bar ── */
+function applyResponsive(){
+  const mob=isMobile();
+  const ms=document.getElementById('mob-seek-section');
+  const ds=document.querySelector('.progress-section:not(#mob-seek-section)');
+  if(ms)ms.style.display=mob?'block':'none';
+  // Show mobile elements
+  document.getElementById('mob-nav').style.display=mob?'flex':'none';
+  document.getElementById('mob-library').style.display=''; // controlled by mob-active class
+  if(!mob){
+    // Reset to desktop state
+    document.getElementById('player-main').classList.add('mob-active');
+    document.getElementById('mob-library').classList.remove('mob-active');
   }
 }
+window.addEventListener('resize',applyResponsive);
 
-function renderFolderList(folders) {
-  const el = document.getElementById('fp-list');
-  if (!folders.length) { el.innerHTML = '<div class="fp-empty">沒有資料夾</div>'; return; }
-  el.innerHTML = folders.map(f => {
-    const active = f.id === currentFolderId ? ' active' : '';
-    return `<button class="fp-item${active}" onclick="selectFolder('${f.id}','${esc(f.name)}')">
-      <span class="fp-ico">📁</span>${esc(f.name)}</button>`;
-  }).join('');
+/* ── Utils ── */
+function fmt(s){if(!isFinite(s))return'0:00';return`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+let _tt;
+function showToast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('show'),2500);
 }
 
-function selectFolder(id, name) {
-  currentFolderId = id;
-  currentFolderName = name || '所有音樂';
-  localStorage.setItem('drivemusic_folder', id);
-  localStorage.setItem('drivemusic_folder_name', currentFolderName);
-  document.getElementById('folder-display').textContent = currentFolderName;
-  // Update active states
-  document.getElementById('fp-all').classList.toggle('active', !id);
-  renderFolderList(allFolders.filter(f => !document.getElementById('fp-search').value || f.name.toLowerCase().includes(document.getElementById('fp-search').value.toLowerCase())));
-  toggleFolderPanel();
-  currentIdx = -1;
-  loadFiles();
-  showToast(`資料夾：${currentFolderName}`);
-}
-
-function applyManualFolder() {
-  const id = document.getElementById('fp-manual-id').value.trim();
-  if (!id) { showToast('請輸入資料夾 ID'); return; }
-  selectFolder(id, '自訂資料夾');
-  document.getElementById('fp-manual-id').value = '';
-}
-
-function toggleFolderPanel() {
-  const panel = document.getElementById('folder-panel');
-  const toggle = document.getElementById('folder-toggle');
-  const isOpen = panel.classList.contains('show');
-  panel.classList.toggle('show', !isOpen);
-  toggle.classList.toggle('open', !isOpen);
-}
-
-function filterFolderList(q) {
-  const lq = q.toLowerCase();
-  const filtered = lq ? allFolders.filter(f => f.name.toLowerCase().includes(lq)) : allFolders;
-  renderFolderList(filtered);
-}
-
-/* ── Start ──────────────────────────────────────────────────── */
-window.addEventListener('load', init);
+/* ── Start ── */
+window.addEventListener('load',()=>{
+  applyResponsive();
+  // default mobile view = player
+  if(isMobile())switchMobView('player');
+  init();
+});
 </script>
 </body>
 </html>
