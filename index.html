@@ -1085,9 +1085,9 @@ async function playTrack(idx){
 
     if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=URL.createObjectURL(blob);
+    updateMediaSession(t); // set metadata BEFORE play → lock screen shows on first lock
     audio.src=currentBlobUrl;
     await audio.play();
-    updateMediaSession(t);
   }catch(e){
     if(reqId!==playReqId)return; // stale error, ignore
     console.error('playTrack error:',e);
@@ -1131,8 +1131,16 @@ function setPlaying(p){
 }
 
 /* ── Audio events ── */
-audio.addEventListener('play',()=>setPlaying(true));
-audio.addEventListener('pause',()=>setPlaying(false));
+audio.addEventListener('play',()=>{
+  setPlaying(true);
+  if('mediaSession' in navigator)
+    navigator.mediaSession.playbackState='playing';
+});
+audio.addEventListener('pause',()=>{
+  setPlaying(false);
+  if('mediaSession' in navigator)
+    navigator.mediaSession.playbackState='paused';
+});
 audio.addEventListener('timeupdate',()=>{
   if(!audio.duration)return;
   const pct=(audio.currentTime/audio.duration)*100;
