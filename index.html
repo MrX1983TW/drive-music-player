@@ -1085,11 +1085,8 @@ async function playTrack(idx){
     if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=URL.createObjectURL(blob);
     audio.src=currentBlobUrl;
-    updateMediaSession(t); // register handlers + metadata before play
     await audio.play();
-    // Confirm playbackState after play() resolves (some Android versions need this)
-    if('mediaSession' in navigator)
-      navigator.mediaSession.playbackState='playing';
+    updateMediaSession(t);
   }catch(e){
     if(reqId!==playReqId)return; // stale error, ignore
     console.error('playTrack error:',e);
@@ -1133,32 +1130,14 @@ function setPlaying(p){
 }
 
 /* ── Audio events ── */
-audio.addEventListener('play',()=>{
-  setPlaying(true);
-  if('mediaSession' in navigator)
-    navigator.mediaSession.playbackState='playing';
-});
-audio.addEventListener('pause',()=>{
-  setPlaying(false);
-  if('mediaSession' in navigator)
-    navigator.mediaSession.playbackState='paused';
-});
+audio.addEventListener('play',()=>setPlaying(true));
+audio.addEventListener('pause',()=>setPlaying(false));
 audio.addEventListener('timeupdate',()=>{
   if(!audio.duration)return;
   const pct=(audio.currentTime/audio.duration)*100;
   ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
   const t=fmt(audio.currentTime);
   ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-  // Update Media Session position state periodically
-  if('mediaSession' in navigator && audio.duration){
-    try{
-      navigator.mediaSession.setPositionState({
-        duration:audio.duration,
-        playbackRate:audio.playbackRate,
-        position:audio.currentTime
-      });
-    }catch(_){}
-  }
 });
 audio.addEventListener('loadedmetadata',()=>{
   const t=fmt(audio.duration);
@@ -1166,37 +1145,29 @@ audio.addEventListener('loadedmetadata',()=>{
 });
 audio.addEventListener('ended',()=>{if(!isRepeat)nextTrack();});
 audio.addEventListener('error',()=>{
-  if(!audio.src||audio.src===window.location.href)return; // ignore empty-src errors
+  if(!audio.src||audio.src===window.location.href)return;
   showToast('播放錯誤，切換下一首…');
   setTimeout(nextTrack,1500);
 });
 
 /* ── Media Session API ── */
-// Default artwork: simple music note as data URI (always loadable, no auth needed)
-const DEFAULT_ARTWORK='data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="#c9a44a"/><text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text></svg>`);
+const DEFAULT_ARTWORK='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="#c9a44a"/><text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text></svg>');
 
 function updateMediaSession(track){
   if(!('mediaSession' in navigator))return;
   const name=track.name.replace(/\.[^.]+$/,'');
-  // Build artwork: always include the guaranteed fallback first
-  const artwork=[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}];
-  if(track.thumbnailLink){
-    // Append authenticated thumbnail (may fail to load, that's OK—fallback is already there)
-    artwork.push({src:track.thumbnailLink+'&access_token='+accessToken,sizes:'256x256',type:'image/jpeg'});
-  }
   navigator.mediaSession.metadata=new MediaMetadata({
     title:name,
     artist:'Drive Music',
     album:currentFolderName,
-    artwork
+    artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
   });
-  navigator.mediaSession.playbackState='playing';
-  navigator.mediaSession.setActionHandler('play',        ()=>audio.play());
-  navigator.mediaSession.setActionHandler('pause',       ()=>audio.pause());
-  navigator.mediaSession.setActionHandler('previoustrack',()=>prevTrack());
-  navigator.mediaSession.setActionHandler('nexttrack',    ()=>nextTrack());
-  navigator.mediaSession.setActionHandler('seekbackward', (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
-  navigator.mediaSession.setActionHandler('seekforward',  (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('play',          ()=>audio.play());
+  navigator.mediaSession.setActionHandler('pause',         ()=>audio.pause());
+  navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
+  navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
+  navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
   try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
 }
 
