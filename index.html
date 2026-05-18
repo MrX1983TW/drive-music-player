@@ -1084,9 +1084,12 @@ async function playTrack(idx){
 
     if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=URL.createObjectURL(blob);
-    updateMediaSession(t); // set metadata BEFORE play → lock screen shows on first lock
     audio.src=currentBlobUrl;
+    updateMediaSession(t); // register handlers + metadata before play
     await audio.play();
+    // Confirm playbackState after play() resolves (some Android versions need this)
+    if('mediaSession' in navigator)
+      navigator.mediaSession.playbackState='playing';
   }catch(e){
     if(reqId!==playReqId)return; // stale error, ignore
     console.error('playTrack error:',e);
@@ -1168,29 +1171,33 @@ audio.addEventListener('error',()=>{
   setTimeout(nextTrack,1500);
 });
 
-/* ── Media Session API ─────────────────────────────────────
-   Tells the OS this is a media player → background playback,
-   lock screen controls, and reliable 'ended' event on Android
-──────────────────────────────────────────────────────────── */
+/* ── Media Session API ── */
+// Default artwork: simple music note as data URI (always loadable, no auth needed)
+const DEFAULT_ARTWORK='data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="#c9a44a"/><text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text></svg>`);
+
 function updateMediaSession(track){
   if(!('mediaSession' in navigator))return;
   const name=track.name.replace(/\.[^.]+$/,'');
+  // Build artwork: always include the guaranteed fallback first
+  const artwork=[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}];
+  if(track.thumbnailLink){
+    // Append authenticated thumbnail (may fail to load, that's OK—fallback is already there)
+    artwork.push({src:track.thumbnailLink+'&access_token='+accessToken,sizes:'256x256',type:'image/jpeg'});
+  }
   navigator.mediaSession.metadata=new MediaMetadata({
     title:name,
     artist:'Drive Music',
     album:currentFolderName,
-    artwork:[
-      {src:track.thumbnailLink||'', sizes:'96x96',  type:'image/jpeg'},
-      {src:track.thumbnailLink||'', sizes:'512x512', type:'image/jpeg'}
-    ].filter(a=>a.src)
+    artwork
   });
-  navigator.mediaSession.setActionHandler('play',   ()=>{ audio.play(); });
-  navigator.mediaSession.setActionHandler('pause',  ()=>{ audio.pause(); });
-  navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
-  navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
-  navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
-  navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration,audio.currentTime+(d.seekOffset||10)); });
-  navigator.mediaSession.setActionHandler('seekto', (d)=>{ if(d.fastSeek&&audio.fastSeek) audio.fastSeek(d.seekTime); else audio.currentTime=d.seekTime; });
+  navigator.mediaSession.playbackState='playing';
+  navigator.mediaSession.setActionHandler('play',        ()=>audio.play());
+  navigator.mediaSession.setActionHandler('pause',       ()=>audio.pause());
+  navigator.mediaSession.setActionHandler('previoustrack',()=>prevTrack());
+  navigator.mediaSession.setActionHandler('nexttrack',    ()=>nextTrack());
+  navigator.mediaSession.setActionHandler('seekbackward', (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('seekforward',  (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
+  try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
 }
 
 /* ── Swipe gestures on player (mobile) ── */
