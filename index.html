@@ -87,6 +87,17 @@ body{
 .t-name{font-size:.93rem;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;}
 .track-item.active .t-name{color:var(--gold);}
 .t-ext{font-family:'Space Mono',monospace;font-size:.7rem;color:var(--muted);text-transform:uppercase;}
+/* List marquee */
+.t-name.t-mq{text-overflow:clip;}
+.t-name.t-mq .t-mq-inner{display:inline-block;}
+.track-item:hover .t-name.t-mq .t-mq-inner,
+.track-item.active .t-name.t-mq .t-mq-inner{
+  animation:list-mq 9s linear infinite;
+}
+@keyframes list-mq{
+  0%,15%{transform:translateX(0);}
+  85%,100%{transform:translateX(calc(-50% - 1em));}
+}
 .eq-anim{display:none;align-items:flex-end;gap:2px;height:14px;}
 .track-item.active .eq-anim{display:flex;}
 .eq-bar{width:2px;background:var(--gold);border-radius:1px;animation:eq .8s ease-in-out infinite alternate;}
@@ -878,15 +889,20 @@ async function apiFetch(url){
 /* ── Render list ── */
 function renderList(tracks){
   visibleTracks=tracks;
+  const LONG=18; // chars threshold for marquee
   const makeHtml=(tracks)=>tracks.map(t=>{
     const gi=allTracks.indexOf(t);
     const active=gi===currentIdx;
     const name=t.name.replace(/\.[^.]+$/,'');
     const ext=t.name.split('.').pop();
+    const isLong=name.length>LONG;
+    const nameHtml=isLong
+      ? `<div class="t-name t-mq"><span class="t-mq-inner">${esc(name)}&nbsp;&nbsp;·&nbsp;&nbsp;${esc(name)}</span></div>`
+      : `<div class="t-name">${esc(name)}</div>`;
     return `<div class="track-item${active?' active':''}" id="ti-${gi}" onclick="playTrack(${gi})">
       <div class="t-num">${active?'<div class="eq-anim"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>':(gi+1)}</div>
       <div class="t-info">
-        <div class="t-name" title="${esc(t.name)}">${esc(name)}</div>
+        ${nameHtml}
         <div class="t-ext">${esc(ext)}</div>
       </div>
     </div>`;
@@ -1016,7 +1032,8 @@ async function playTrack(idx){
     const blob=await resp.blob();
     currentBlobUrl=URL.createObjectURL(blob);
     audio.src=currentBlobUrl;
-    audio.play().catch(()=>showToast('播放錯誤'));
+    await audio.play();
+    updateMediaSession(t);
   }catch(e){
     console.error('playTrack fetch error:',e);
     showToast('載入失敗：'+e.message);
@@ -1067,6 +1084,16 @@ audio.addEventListener('timeupdate',()=>{
   ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
   const t=fmt(audio.currentTime);
   ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  // Update Media Session position state periodically
+  if('mediaSession' in navigator && audio.duration){
+    try{
+      navigator.mediaSession.setPositionState({
+        duration:audio.duration,
+        playbackRate:audio.playbackRate,
+        position:audio.currentTime
+      });
+    }catch(_){}
+  }
 });
 audio.addEventListener('loadedmetadata',()=>{
   const t=fmt(audio.duration);
@@ -1074,6 +1101,31 @@ audio.addEventListener('loadedmetadata',()=>{
 });
 audio.addEventListener('ended',()=>{if(!isRepeat)nextTrack();});
 audio.addEventListener('error',()=>{showToast('播放錯誤，切換下一首…');setTimeout(nextTrack,1500);});
+
+/* ── Media Session API ─────────────────────────────────────
+   Tells the OS this is a media player → background playback,
+   lock screen controls, and reliable 'ended' event on Android
+──────────────────────────────────────────────────────────── */
+function updateMediaSession(track){
+  if(!('mediaSession' in navigator))return;
+  const name=track.name.replace(/\.[^.]+$/,'');
+  navigator.mediaSession.metadata=new MediaMetadata({
+    title:name,
+    artist:'Drive Music',
+    album:currentFolderName,
+    artwork:[
+      {src:track.thumbnailLink||'', sizes:'96x96',  type:'image/jpeg'},
+      {src:track.thumbnailLink||'', sizes:'512x512', type:'image/jpeg'}
+    ].filter(a=>a.src)
+  });
+  navigator.mediaSession.setActionHandler('play',   ()=>{ audio.play(); });
+  navigator.mediaSession.setActionHandler('pause',  ()=>{ audio.pause(); });
+  navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
+  navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
+  navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration,audio.currentTime+(d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('seekto', (d)=>{ if(d.fastSeek&&audio.fastSeek) audio.fastSeek(d.seekTime); else audio.currentTime=d.seekTime; });
+}
 
 /* ── Swipe gestures on player (mobile) ── */
 let _sx=null,_sy=null;
