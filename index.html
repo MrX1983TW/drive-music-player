@@ -728,6 +728,7 @@ let currentFolderId=localStorage.getItem('drivemusic_folder')||'';
 let currentFolderName=localStorage.getItem('drivemusic_folder_name')||'所有音樂';
 let allFolders=[];
 let currentBlobUrl=null;
+let playReqId=0; // increments each playTrack call; stale fetches check against this
 let isMobile=()=>window.innerWidth<=640;
 
 const audio=document.getElementById('audio');
@@ -1041,46 +1042,55 @@ async function fetchAudioWithRetry(fileId){
 }
 async function playTrack(idx){
   if(idx<0||idx>=allTracks.length)return;
+
+  const reqId=++playReqId; // unique ID for this request
+
   currentIdx=idx;
   const t=allTracks[idx];
   const name=t.name.replace(/\.[^.]+$/,'');
   const ext=(t.name.split('.').pop()||'audio').toUpperCase();
+
+  // Update UI immediately (optimistic)
   setupMarquee('now-title',name);
-  // On mobile: if player is hidden (library tab active), marquee runs on switchMobView
-  // Auto-switch to player view when a track is tapped on mobile
-  if(isMobile() && mobView!=='player'){
-    switchMobView('player');
-  }
+  if(isMobile()&&mobView!=='player') switchMobView('player');
   document.getElementById('now-ext').textContent=ext;
   document.getElementById('now-folder-name').textContent=currentFolderName;
   document.title=`♪ ${name}`;
-  // Mini player update
   const mt=document.getElementById('mini-title');
   if(mt){mt.textContent=name;mt.classList.remove('idle');}
   const mf=document.getElementById('mini-folder');
   if(mf)mf.textContent=currentFolderName;
   const label=document.getElementById('vinyl-label');
   label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`: '<span class="vinyl-label-icon">♪</span>';
+
+  // Stop current audio immediately
+  audio.pause();
+  audio.src='';
+
   renderList(visibleTracks);
   setTimeout(()=>{
-    ['ti-'+idx].forEach(id=>{
-      // scroll in both lists
-      document.querySelectorAll(`#ti-${idx}`).forEach(el=>el.scrollIntoView({behavior:'smooth',block:'nearest'}));
-    });
+    document.querySelectorAll(`#ti-${idx}`).forEach(el=>el.scrollIntoView({behavior:'smooth',block:'nearest'}));
   },50);
-  if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
+
   try{
     showToast(`載入中：${name}`);
-    // Proactively refresh token if near expiry (works even after screen-off)
     await refreshTokenIfNeeded();
-    const resp = await fetchAudioWithRetry(t.id);
+    if(reqId!==playReqId)return; // stale: user picked another song
+
+    const resp=await fetchAudioWithRetry(t.id);
+    if(reqId!==playReqId)return; // stale
+
     const blob=await resp.blob();
+    if(reqId!==playReqId)return; // stale
+
+    if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=URL.createObjectURL(blob);
     audio.src=currentBlobUrl;
     await audio.play();
     updateMediaSession(t);
   }catch(e){
-    console.error('playTrack fetch error:',e);
+    if(reqId!==playReqId)return; // stale error, ignore
+    console.error('playTrack error:',e);
     showToast('載入失敗：'+e.message);
     setTimeout(nextTrack,2000);
   }
