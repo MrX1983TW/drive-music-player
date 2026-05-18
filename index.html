@@ -1065,7 +1065,6 @@ async function playTrack(idx){
 
   // Stop current audio immediately
   audio.pause();
-  audio.src='';
 
   renderList(visibleTracks);
   setTimeout(()=>{
@@ -1163,7 +1162,11 @@ audio.addEventListener('loadedmetadata',()=>{
   ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
 });
 audio.addEventListener('ended',()=>{if(!isRepeat)nextTrack();});
-audio.addEventListener('error',()=>{showToast('播放錯誤，切換下一首…');setTimeout(nextTrack,1500);});
+audio.addEventListener('error',()=>{
+  if(!audio.src||audio.src===window.location.href)return; // ignore empty-src errors
+  showToast('播放錯誤，切換下一首…');
+  setTimeout(nextTrack,1500);
+});
 
 /* ── Media Session API ─────────────────────────────────────
    Tells the OS this is a media player → background playback,
