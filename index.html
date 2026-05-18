@@ -334,14 +334,17 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
     background:var(--surface);
     border-top:1px solid var(--border);
     box-shadow:0 -1px 10px rgba(0,0,0,.07);
-    padding-bottom:calc(14px + var(--sab));
     flex-shrink:0;
-    min-height:72px;
+    padding-bottom:var(--sab); /* safe area strip below buttons */
   }
   .mob-nav-btn{
-    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:5px;padding:12px 6px 4px;background:none;border:none;cursor:pointer;
-    color:var(--muted);font-family:'Instrument Sans',sans-serif;font-size:.76rem;font-weight:500;
+    flex:1;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:5px;
+    height:58px; /* fixed visible height: icon(22) + gap(5) + text(13) + breathing room */
+    padding:0 6px;
+    background:none;border:none;cursor:pointer;
+    color:var(--muted);font-family:'Instrument Sans',sans-serif;font-size:.78rem;font-weight:500;
     transition:color .15s;
   }
   .mob-nav-btn.active{color:var(--gold);}
@@ -809,6 +812,11 @@ function switchMobView(view){
     library.classList.remove('mob-active');
     navPlayer.classList.add('active');
     navLibrary.classList.remove('active');
+    // Re-measure marquee now that player is visible
+    if(currentIdx>=0 && allTracks[currentIdx]){
+      const name=allTracks[currentIdx].name.replace(/\.[^.]+$/,'');
+      requestAnimationFrame(()=>setupMarquee('now-title',name));
+    }
   }else{
     player.classList.remove('mob-active');
     library.classList.add('mob-active');
@@ -978,6 +986,11 @@ async function playTrack(idx){
   const name=t.name.replace(/\.[^.]+$/,'');
   const ext=(t.name.split('.').pop()||'audio').toUpperCase();
   setupMarquee('now-title',name);
+  // On mobile: if player is hidden (library tab active), marquee runs on switchMobView
+  // Auto-switch to player view when a track is tapped on mobile
+  if(isMobile() && mobView!=='player'){
+    switchMobView('player');
+  }
   document.getElementById('now-ext').textContent=ext;
   document.getElementById('now-folder-name').textContent=currentFolderName;
   document.title=`♪ ${name}`;
