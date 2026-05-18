@@ -994,7 +994,51 @@ function filterFolderList(q){
 }
 function filterFolderListMob(q){filterFolderList(q);}
 
-/* ── Playback ── */
+/* ── Token refresh helper (Promise-based) ── */
+function refreshTokenIfNeeded(){
+  // If token still has more than 3 min left, no need to refresh
+  if(accessToken && Date.now() < tokenExpiry - 180000) return Promise.resolve();
+  return new Promise((resolve, reject)=>{
+    if(!tokenClient){reject(new Error('no tokenClient'));return;}
+    const orig = tokenClient.callback;
+    tokenClient.callback = (resp)=>{
+      tokenClient.callback = orig; // restore
+      if(resp.error){reject(new Error(resp.error));return;}
+      accessToken  = resp.access_token;
+      tokenExpiry  = Date.now() + (resp.expires_in - 120) * 1000;
+      document.getElementById('token-warn').style.display='none';
+      resolve();
+    };
+    tokenClient.requestAccessToken({prompt:''});
+  });
+}
+
+async function fetchAudioWithRetry(fileId){
+  // First attempt
+  const tryFetch = async ()=>{
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      {headers:{Authorization:`Bearer ${accessToken}`}}
+    );
+    return resp;
+  };
+
+  let resp = await tryFetch();
+
+  // 401 → refresh token → retry once
+  if(resp.status === 401){
+    showToast('Token 已過期，正在重新登入…');
+    try{
+      await refreshTokenIfNeeded();
+    }catch(e){
+      throw new Error('Token 刷新失敗，請重新登入');
+    }
+    resp = await tryFetch();
+  }
+
+  if(!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp;
+}
 async function playTrack(idx){
   if(idx<0||idx>=allTracks.length)return;
   currentIdx=idx;
@@ -1027,8 +1071,9 @@ async function playTrack(idx){
   if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
   try{
     showToast(`載入中：${name}`);
-    const resp=await fetch(`https://www.googleapis.com/drive/v3/files/${t.id}?alt=media`,{headers:{Authorization:`Bearer ${accessToken}`}});
-    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    // Proactively refresh token if near expiry (works even after screen-off)
+    await refreshTokenIfNeeded();
+    const resp = await fetchAudioWithRetry(t.id);
     const blob=await resp.blob();
     currentBlobUrl=URL.createObjectURL(blob);
     audio.src=currentBlobUrl;
