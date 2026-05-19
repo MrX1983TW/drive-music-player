@@ -22,11 +22,11 @@
   --sar:env(safe-area-inset-right,0px);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;height:100dvh;overscroll-behavior:none;}
+html,body{height:100%;height:var(--app-height,100dvh);overscroll-behavior:none;}
 body{
   font-family:'Instrument Sans',sans-serif;
   background:var(--bg);color:var(--cream);
-  height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column;
+  height:100vh;height:var(--app-height,100dvh);overflow:hidden;display:flex;flex-direction:column;
 }
 
 /* ═══════════════════════════════
@@ -711,7 +711,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 
 </div><!-- /app -->
 
-<audio id="audio" preload="none" controls style="display:none;position:absolute;width:0;height:0;"></audio>
+<audio id="audio" preload="metadata" playsinline webkit-playsinline controls style="position:fixed;left:-9999px;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;"></audio>
 <div class="toast" id="toast"></div>
 <script src="https://accounts.google.com/gsi/client"></script>
 <script>
@@ -733,19 +733,25 @@ let isMobile=()=>window.innerWidth<=640;
 
 const audio=document.getElementById('audio');
 
-/* ── Audio focus: claim highest priority via AudioContext ──
-   Must be triggered from a user gesture (first login click counts)
-   This is what beats YouTube Music / other apps on Android
+/* ── Mobile-safe audio focus ──
+   Avoid hijacking audio through MediaElementSource on Android.
+   Many ROMs stop exposing lockscreen / notification controls when
+   audio is routed through WebAudio unnecessarily.
 ── */
 let _audioCtx=null;
 function claimAudioFocus(){
-  if(_audioCtx) return;
   try{
-    _audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    const src=_audioCtx.createMediaElementSource(audio);
-    src.connect(_audioCtx.destination);
-    if(_audioCtx.state==='suspended') _audioCtx.resume();
-  }catch(e){ console.warn('AudioContext failed:',e); }
+    if(window.AudioContext || window.webkitAudioContext){
+      if(!_audioCtx){
+        _audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      }
+      if(_audioCtx.state === 'suspended'){
+        _audioCtx.resume().catch(()=>{});
+      }
+    }
+  }catch(e){
+    console.warn('Audio focus init failed:', e);
+  }
 }
 
 /* ── Register Media Session handlers early (before any playback)
@@ -754,14 +760,29 @@ function claimAudioFocus(){
 ── */
 function registerMediaSessionHandlers(){
   if(!('mediaSession' in navigator)) return;
-  navigator.mediaSession.setActionHandler('play',          ()=>audio.play());
-  navigator.mediaSession.setActionHandler('pause',         ()=>audio.pause());
+  navigator.mediaSession.setActionHandler('play', async ()=>{
+    try{
+      await audio.play();
+      navigator.mediaSession.playbackState='playing';
+    }catch(e){}
+  });
+  navigator.mediaSession.setActionHandler('pause', ()=>{
+    audio.pause();
+    navigator.mediaSession.playbackState='paused';
+  });
   navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
   navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
   navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
   navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
   try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
 }
+
+
+/* Better mobile viewport stability */
+window.addEventListener('resize', ()=>{
+  document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+});
+document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
 
 /* ── Init ── */
 function init(){
@@ -1075,6 +1096,78 @@ async function fetchAudioWithRetry(fileId){
   if(!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp;
 }
+
+function updateMediaSession(track){
+  if(!('mediaSession' in navigator) || !track) return;
+
+  const cleanName = (track.name || '').replace(/\.[^.]+$/, '');
+
+  let artwork = [];
+  if(track.thumbnailLink){
+    artwork = [
+      {src: track.thumbnailLink, sizes:'512x512', type:'image/png'}
+    ];
+  }
+
+  try{
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: cleanName,
+      artist: 'Drive Music',
+      album: currentFolderName || 'Google Drive',
+      artwork
+    });
+  }catch(e){
+    console.warn('MediaMetadata failed:', e);
+  }
+
+  navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+
+  updatePositionState();
+}
+
+function updatePositionState(){
+  if(!('mediaSession' in navigator)) return;
+
+  try{
+    if(audio.duration && isFinite(audio.duration)){
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        playbackRate: audio.playbackRate || 1,
+        position: audio.currentTime
+      });
+    }
+  }catch(e){}
+}
+
+audio.addEventListener('play', ()=>{
+  if('mediaSession' in navigator){
+    navigator.mediaSession.playbackState='playing';
+  }
+  if(currentIdx >= 0 && allTracks[currentIdx]){
+    updateMediaSession(allTracks[currentIdx]);
+  }
+});
+
+audio.addEventListener('pause', ()=>{
+  if('mediaSession' in navigator){
+    navigator.mediaSession.playbackState='paused';
+  }
+});
+
+audio.addEventListener('loadedmetadata', updatePositionState);
+audio.addEventListener('timeupdate', ()=>{
+  if(audio.currentTime % 5 < 0.3){
+    updatePositionState();
+  }
+});
+
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden && currentIdx >= 0 && allTracks[currentIdx]){
+    updateMediaSession(allTracks[currentIdx]);
+  }
+});
+
+
 async function playTrack(idx){
   if(idx<0||idx>=allTracks.length)return;
 
