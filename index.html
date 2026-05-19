@@ -1178,14 +1178,15 @@ audio.addEventListener('pause',()=>{
 });
 audio.addEventListener('timeupdate',()=>{
   // Backup for when 'ended' event is missed while page is frozen (screen off)
-  if(audio.ended&&!_isSwitchingTrack){
+  // Guard _isSeeking: seeking near end must NOT trigger nextTrack
+  if(audio.ended&&!_isSwitchingTrack&&!_isSeeking){
     stopMediaSessionKeepalive();
     if(!isRepeat)nextTrack();
     else{audio.currentTime=0;audio.play().catch(()=>{});}
     return;
   }
   if(!audio.duration)return;
-  // Don't overwrite bar position while user is dragging
+  // Don't overwrite bar/time while user is dragging (seekAudio handles it directly)
   if(!_isSeeking){
     const pct=(audio.currentTime/audio.duration)*100;
     ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
@@ -1361,24 +1362,24 @@ function prevTrack(){
   if(audio.currentTime>3){audio.currentTime=0;return;}
   playTrack((currentIdx-1+allTracks.length)%allTracks.length);
 }
-function seekAudio(v){if(audio.duration)audio.currentTime=(v/100)*audio.duration;}
+function seekAudio(v){
+  if(!audio.duration)return;
+  audio.currentTime=(v/100)*audio.duration;
+  // Immediately sync both bars and time display (don't wait for timeupdate)
+  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=v;});
+  const t=fmt(audio.currentTime);
+  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+}
 
 /* ── Seek bar drag: pause timeupdate bar-sync while user is dragging ── */
 ['seek-bar','seek-bar-m'].forEach(id=>{
   const el=document.getElementById(id);
   if(!el)return;
-  // pointerdown covers mouse and touch in one event
   el.addEventListener('pointerdown',()=>{_isSeeking=true;});
-  el.addEventListener('pointerup',()=>{
-    _isSeeking=false;
-    // Ensure a final sync of the time display after release
-    if(audio.duration){
-      const t=fmt(audio.currentTime);
-      ['cur-time','cur-time-m'].forEach(tid=>{const te=document.getElementById(tid);if(te)te.textContent=t;});
-    }
-  });
-  // Fallback: if pointer is released outside the element
+  el.addEventListener('pointerup',()=>{_isSeeking=false;});
   el.addEventListener('pointercancel',()=>{_isSeeking=false;});
+  // Safety net: if pointerup is somehow missed, change always fires last
+  el.addEventListener('change',()=>{_isSeeking=false;});
 });
 function setVolume(v){audio.volume=v/100;}
 function toggleShuffle(){
