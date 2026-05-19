@@ -726,6 +726,7 @@ let allFolders=[];
 let currentBlobUrl=null;
 let playReqId=0; // increments each playTrack call; stale fetches check against this
 let _isSwitchingTrack=false; // true during inter-track gap; prevents Vivo from reclaiming media focus
+let _isSeeking=false;        // true while user drags seek bar; blocks timeupdate from overwriting position
 let isMobile=()=>window.innerWidth<=640;
 
 const audio=document.getElementById('audio');
@@ -1176,11 +1177,21 @@ audio.addEventListener('pause',()=>{
   // If _isSwitchingTrack: keepalive keeps running, session stays 'playing', lock stays held
 });
 audio.addEventListener('timeupdate',()=>{
+  // Backup for when 'ended' event is missed while page is frozen (screen off)
+  if(audio.ended&&!_isSwitchingTrack){
+    stopMediaSessionKeepalive();
+    if(!isRepeat)nextTrack();
+    else{audio.currentTime=0;audio.play().catch(()=>{});}
+    return;
+  }
   if(!audio.duration)return;
-  const pct=(audio.currentTime/audio.duration)*100;
-  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
-  const t=fmt(audio.currentTime);
-  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  // Don't overwrite bar position while user is dragging
+  if(!_isSeeking){
+    const pct=(audio.currentTime/audio.duration)*100;
+    ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
+    const t=fmt(audio.currentTime);
+    ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  }
   if(audio.currentTime%5<0.3) updatePositionState();
 });
 audio.addEventListener('loadedmetadata',()=>{
@@ -1202,7 +1213,14 @@ audio.addEventListener('error',()=>{
 
 /* ── Visibility: re-assert media session when tab comes back ── */
 document.addEventListener('visibilitychange',()=>{
-  if(!document.hidden&&!audio.paused&&currentIdx>=0&&allTracks[currentIdx])
+  if(document.hidden)return;
+  // If track ended while page was frozen, advance now
+  if(audio.ended&&!_isSwitchingTrack){
+    if(!isRepeat)nextTrack();
+    else{audio.currentTime=0;audio.play().catch(()=>{});}
+    return;
+  }
+  if(!audio.paused&&currentIdx>=0&&allTracks[currentIdx])
     updateMediaSession(allTracks[currentIdx]);
 });
 
@@ -1212,13 +1230,24 @@ document.addEventListener('visibilitychange',()=>{
    On resume, re-assert media session and restart keepalive.
 ── */
 document.addEventListener('resume',()=>{
+  if(audio.ended&&!_isSwitchingTrack){
+    if(!isRepeat)nextTrack();
+    else{audio.currentTime=0;audio.play().catch(()=>{});}
+    return;
+  }
   if(currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
     updateMediaSession(allTracks[currentIdx]);
     startMediaSessionKeepalive();
   }
 });
 window.addEventListener('pageshow',(e)=>{
-  if(e.persisted&&currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
+  if(!e.persisted)return;
+  if(audio.ended&&!_isSwitchingTrack){
+    if(!isRepeat)nextTrack();
+    else{audio.currentTime=0;audio.play().catch(()=>{});}
+    return;
+  }
+  if(currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
     updateMediaSession(allTracks[currentIdx]);
     startMediaSessionKeepalive();
   }
@@ -1333,6 +1362,24 @@ function prevTrack(){
   playTrack((currentIdx-1+allTracks.length)%allTracks.length);
 }
 function seekAudio(v){if(audio.duration)audio.currentTime=(v/100)*audio.duration;}
+
+/* ── Seek bar drag: pause timeupdate bar-sync while user is dragging ── */
+['seek-bar','seek-bar-m'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(!el)return;
+  // pointerdown covers mouse and touch in one event
+  el.addEventListener('pointerdown',()=>{_isSeeking=true;});
+  el.addEventListener('pointerup',()=>{
+    _isSeeking=false;
+    // Ensure a final sync of the time display after release
+    if(audio.duration){
+      const t=fmt(audio.currentTime);
+      ['cur-time','cur-time-m'].forEach(tid=>{const te=document.getElementById(tid);if(te)te.textContent=t;});
+    }
+  });
+  // Fallback: if pointer is released outside the element
+  el.addEventListener('pointercancel',()=>{_isSeeking=false;});
+});
 function setVolume(v){audio.volume=v/100;}
 function toggleShuffle(){
   isShuffle=!isShuffle;
