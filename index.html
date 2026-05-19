@@ -725,6 +725,7 @@ let currentFolderName=localStorage.getItem('drivemusic_folder_name')||'所有音
 let allFolders=[];
 let currentBlobUrl=null;
 let playReqId=0; // increments each playTrack call; stale fetches check against this
+let _isSwitchingTrack=false; // true during inter-track gap; prevents Vivo from reclaiming media focus
 let isMobile=()=>window.innerWidth<=640;
 
 const audio=document.getElementById('audio');
@@ -738,45 +739,35 @@ const DEFAULT_ARTWORK = 'data:image/svg+xml,' + encodeURIComponent(
 );
 
 /* ── Vivo / Funtouch OS media focus keepalive ──────────────────
-   Vivo's ROM periodically reclaims media focus from web pages.
-   We fight back by re-asserting metadata + handlers every 4s
-   while audio is playing. Interval is cleared on pause/end.
+   Origin OS 6 periodically reclaims media focus from web pages,
+   and always reclaims it during the brief pause between tracks.
+   We fight back by:
+   1. Keeping the timer alive during track switches (_isSwitchingTrack)
+   2. Force-asserting 'playing' state while fetching the next blob
+   3. Re-asserting full metadata + handlers every 2s while playing
 ─────────────────────────────────────────────────────────────── */
 let _keepaliveTimer = null;
 
 function startMediaSessionKeepalive(){
   stopMediaSessionKeepalive();
   _keepaliveTimer = setInterval(()=>{
-    if(audio.paused || currentIdx < 0) return;
+    if(currentIdx < 0) return;
+    if(audio.paused && !_isSwitchingTrack) return; // genuinely paused by user — skip
     const track = allTracks[currentIdx];
     if(!track || !('mediaSession' in navigator)) return;
-    // Re-assert full metadata every 3s — Origin OS 6 clears it more aggressively
-    updateMediaSession(track);
-  }, 3000);
+    if(_isSwitchingTrack){
+      // During fetch gap: force the session to look alive so Vivo doesn't reclaim it
+      navigator.mediaSession.playbackState='playing';
+      registerMediaSessionHandlers();
+    }else{
+      updateMediaSession(track);
+      updatePositionState();
+    }
+  }, 2000);
 }
 
 function stopMediaSessionKeepalive(){
   if(_keepaliveTimer){ clearInterval(_keepaliveTimer); _keepaliveTimer=null; }
-}
-
-/* ── Avoid hijacking audio through MediaElementSource on Android.
-   Many ROMs stop exposing lockscreen / notification controls when
-   audio is routed through WebAudio unnecessarily.
-── */
-let _audioCtx=null;
-function claimAudioFocus(){
-  try{
-    if(window.AudioContext || window.webkitAudioContext){
-      if(!_audioCtx){
-        _audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-      }
-      if(_audioCtx.state === 'suspended'){
-        _audioCtx.resume().catch(()=>{});
-      }
-    }
-  }catch(e){
-    console.warn('Audio focus init failed:', e);
-  }
 }
 
 /* ── Register Media Session handlers early (before any playback)
@@ -858,8 +849,7 @@ function onToken(resp){
 }
 function signIn(){
   if(!tokenClient)initAuth();
-  claimAudioFocus();           // grab audio focus on first user gesture
-  registerMediaSessionHandlers(); // register handlers early
+  registerMediaSessionHandlers(); // register handlers early on first user gesture
   tokenClient.requestAccessToken({prompt:'consent'});
 }
 function signOut(){
@@ -1174,8 +1164,12 @@ audio.addEventListener('play',()=>{
 });
 audio.addEventListener('pause',()=>{
   setPlaying(false);
-  if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
-  stopMediaSessionKeepalive();
+  if(!_isSwitchingTrack){
+    // Genuine user pause — update session state and stop keepalive
+    if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
+    stopMediaSessionKeepalive();
+  }
+  // If _isSwitchingTrack: keepalive keeps running, session stays 'playing'
 });
 audio.addEventListener('timeupdate',()=>{
   if(!audio.duration)return;
@@ -1217,6 +1211,24 @@ async function playTrack(idx){
   const name=t.name.replace(/\.[^.]+$/,'');
   const ext=(t.name.split('.').pop()||'audio').toUpperCase();
 
+  // ── Vivo: signal track switch before pause fires ──────────────
+  // This prevents the pause event from stopping the keepalive,
+  // and forces the session to show as 'playing' during the fetch gap.
+  _isSwitchingTrack=true;
+  if('mediaSession' in navigator){
+    try{
+      navigator.mediaSession.metadata=new MediaMetadata({
+        title:name,artist:'Drive Music',
+        album:currentFolderName||'Google Drive',
+        artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
+      });
+      navigator.mediaSession.playbackState='playing';
+    }catch(_){}
+    registerMediaSessionHandlers();
+  }
+  startMediaSessionKeepalive(); // keep asserting through the fetch gap
+  // ─────────────────────────────────────────────────────────────
+
   // Update UI immediately (optimistic)
   setupMarquee('now-title',name);
   if(isMobile()&&mobView!=='player') switchMobView('player');
@@ -1230,7 +1242,7 @@ async function playTrack(idx){
   const label=document.getElementById('vinyl-label');
   label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`: '<span class="vinyl-label-icon">♪</span>';
 
-  // Stop current audio immediately
+  // Stop current audio (pause event fires but _isSwitchingTrack=true → keepalive stays)
   audio.pause();
 
   renderList(visibleTracks);
@@ -1241,20 +1253,22 @@ async function playTrack(idx){
   try{
     showToast(`載入中：${name}`);
     await refreshTokenIfNeeded();
-    if(reqId!==playReqId)return; // stale: user picked another song
+    if(reqId!==playReqId){_isSwitchingTrack=false;return;} // stale: user picked another song
 
     const resp=await fetchAudioWithRetry(t.id);
-    if(reqId!==playReqId)return; // stale
+    if(reqId!==playReqId){_isSwitchingTrack=false;return;} // stale
 
     const blob=await resp.blob();
-    if(reqId!==playReqId)return; // stale
+    if(reqId!==playReqId){_isSwitchingTrack=false;return;} // stale
 
     if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=URL.createObjectURL(blob);
     audio.src=currentBlobUrl;
     await audio.play();
-    updateMediaSession(t);
+    _isSwitchingTrack=false; // fetch complete, real playback begins
+    updateMediaSession(t);   // final full assert now that duration is available
   }catch(e){
+    _isSwitchingTrack=false;
     if(reqId!==playReqId)return; // stale error, ignore
     console.error('playTrack error:',e);
     showToast('載入失敗：'+e.message);
