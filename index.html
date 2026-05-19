@@ -237,9 +237,6 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
   .ctrl-btn{padding:10px;}
   .play-btn{width:60px;height:60px;}
 
-  /* Volume row smaller on mobile */
-  .vol-row{max-width:280px;}
-
   /* ── Mobile Library Panel ── */
   #mob-library{
     display:none;
@@ -302,7 +299,6 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 
   /* ── Mini player (shows in Library view) ── */
   .mini-player{
-    display:none;
     align-items:center;gap:12px;
     background:var(--surface);
     border-top:1px solid var(--border);
@@ -528,12 +524,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
           <span id="cur-time">0:00</span>
           <span id="dur-time">0:00</span>
         </div>
-        <input type="range" id="seek-bar" min="0" max="100" value="0" step="0.1"
-               onmousedown="isSeeking=true" ontouchstart="isSeeking=true"
-               oninput="previewSeek(this.value)"
-               onchange="commitSeek(this.value)"
-               onmouseup="commitSeek(this.value)"
-               ontouchend="commitSeek(this.value)">
+        <input type="range" id="seek-bar" min="0" max="100" value="0" step="0.1" oninput="seekAudio(this.value)">
       </div>
       <div class="ctrl-row">
         <button class="ctrl-btn" id="shuffle-btn" onclick="toggleShuffle()">
@@ -574,12 +565,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
           <span id="cur-time-m">0:00</span>
           <span id="dur-time-m">0:00</span>
         </div>
-        <input type="range" id="seek-bar-m" min="0" max="100" value="0" step="0.1"
-               ontouchstart="isSeeking=true" onmousedown="isSeeking=true"
-               oninput="previewSeek(this.value)"
-               onchange="commitSeek(this.value)"
-               ontouchend="commitSeek(this.value)"
-               onmouseup="commitSeek(this.value)">
+        <input type="range" id="seek-bar-m" min="0" max="100" value="0" step="0.1" oninput="seekAudio(this.value)">
       </div>
     </div>
     <!-- Swipe hint -->
@@ -725,60 +711,80 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 <div class="toast" id="toast"></div>
 <script src="https://accounts.google.com/gsi/client"></script>
 <script>
-/* ══════════════════════════════════════════════════════
-   DRIVE MUSIC — main script
-   Clean consolidated version (no duplicates)
-══════════════════════════════════════════════════════ */
-
 /* ── Config ── */
 let CLIENT_ID = localStorage.getItem('drivemusic_cid') || '';
 const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
-const AUDIO_MIMES = ['audio/mpeg','audio/mp3','audio/mp4','audio/flac',
-  'audio/wav','audio/x-wav','audio/ogg','audio/aac',
-  'audio/x-m4a','audio/webm','audio/x-flac','audio/opus'];
+const AUDIO_MIMES = ['audio/mpeg','audio/mp3','audio/mp4','audio/flac','audio/wav','audio/x-wav','audio/ogg','audio/aac','audio/x-m4a','audio/webm','audio/x-flac','audio/opus'];
 
 /* ── State ── */
-let tokenClient=null, accessToken=null, tokenExpiry=0;
-let allTracks=[], visibleTracks=[], currentIdx=-1;
-let isShuffle=false, isRepeat=false;
-let currentFolderId   = localStorage.getItem('drivemusic_folder') || '';
-let currentFolderName = localStorage.getItem('drivemusic_folder_name') || '所有音樂';
+let tokenClient=null,accessToken=null,tokenExpiry=0;
+let allTracks=[],visibleTracks=[],currentIdx=-1;
+let isShuffle=false,isRepeat=false;
+let currentFolderId=localStorage.getItem('drivemusic_folder')||'';
+let currentFolderName=localStorage.getItem('drivemusic_folder_name')||'所有音樂';
 let allFolders=[];
 let currentBlobUrl=null;
-let playReqId=0;
-let isSeeking=false;
+let playReqId=0; // increments each playTrack call; stale fetches check against this
+let _isSwitchingTrack=false; // true during inter-track gap; prevents Vivo from reclaiming media focus
 let isMobile=()=>window.innerWidth<=640;
 
-const audio = document.getElementById('audio');
+const audio=document.getElementById('audio');
 
-/* ── Media Session ── */
+/* ── Media Session constants ── */
 const DEFAULT_ARTWORK = 'data:image/svg+xml,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">' +
   '<rect width="96" height="96" rx="12" fill="#c9a44a"/>' +
-  '<text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text></svg>'
+  '<text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text>' +
+  '</svg>'
 );
 
+/* ── Vivo / Funtouch OS media focus keepalive ──────────────────
+   Origin OS 6 periodically reclaims media focus from web pages,
+   and always reclaims it during the brief pause between tracks.
+   We fight back by:
+   1. Keeping the timer alive during track switches (_isSwitchingTrack)
+   2. Force-asserting 'playing' state while fetching the next blob
+   3. Re-asserting full metadata + handlers every 2s while playing
+─────────────────────────────────────────────────────────────── */
 let _keepaliveTimer = null;
 
 function startMediaSessionKeepalive(){
   stopMediaSessionKeepalive();
   _keepaliveTimer = setInterval(()=>{
-    if(audio.paused || currentIdx < 0) return;
+    if(currentIdx < 0) return;
+    if(audio.paused && !_isSwitchingTrack) return; // genuinely paused by user — skip
     const track = allTracks[currentIdx];
-    if(track) updateMediaSession(track);
-  }, 3000);
+    if(!track || !('mediaSession' in navigator)) return;
+    if(_isSwitchingTrack){
+      // During fetch gap: force the session to look alive so Vivo doesn't reclaim it
+      navigator.mediaSession.playbackState='playing';
+      registerMediaSessionHandlers();
+    }else{
+      updateMediaSession(track);
+      updatePositionState();
+    }
+  }, 2000);
 }
+
 function stopMediaSessionKeepalive(){
   if(_keepaliveTimer){ clearInterval(_keepaliveTimer); _keepaliveTimer=null; }
 }
 
+/* ── Register Media Session handlers early (before any playback)
+   Android Chrome shows notification as soon as handlers are registered
+   and audio starts playing — not just when metadata is set
+── */
 function registerMediaSessionHandlers(){
   if(!('mediaSession' in navigator)) return;
   navigator.mediaSession.setActionHandler('play', async ()=>{
-    try{ await audio.play(); navigator.mediaSession.playbackState='playing'; }catch(e){}
+    try{
+      await audio.play();
+      navigator.mediaSession.playbackState='playing';
+    }catch(e){}
   });
   navigator.mediaSession.setActionHandler('pause', ()=>{
-    audio.pause(); navigator.mediaSession.playbackState='paused';
+    audio.pause();
+    navigator.mediaSession.playbackState='paused';
   });
   navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
   navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
@@ -787,123 +793,38 @@ function registerMediaSessionHandlers(){
   try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
 }
 
-function updateMediaSession(track){
-  if(!('mediaSession' in navigator) || !track) return;
-  const name = (track.name||'').replace(/\.[^.]+$/,'');
-  try{
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title:  name,
-      artist: 'Drive Music',
-      album:  currentFolderName || 'Google Drive',
-      artwork:[{ src:DEFAULT_ARTWORK, sizes:'96x96', type:'image/svg+xml' }]
-    });
-  }catch(e){ console.warn('MediaMetadata failed:',e); }
-  navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
-  registerMediaSessionHandlers();
-  updatePositionState();
-}
 
-function updatePositionState(){
-  if(!('mediaSession' in navigator)) return;
-  try{
-    if(audio.duration && isFinite(audio.duration)){
-      navigator.mediaSession.setPositionState({
-        duration:     audio.duration,
-        playbackRate: audio.playbackRate || 1,
-        position:     audio.currentTime
-      });
-    }
-  }catch(e){}
-}
+/* Better mobile viewport stability */
+window.addEventListener('resize', ()=>{
+  document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+});
+document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
 
-/* ── Audio focus (no createMediaElementSource — breaks Vivo ROM notification) ── */
-let _audioCtx = null;
-function claimAudioFocus(){
-  try{
-    if(!_audioCtx && (window.AudioContext || window.webkitAudioContext)){
-      _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if(_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume().catch(()=>{});
-  }catch(e){ console.warn('AudioContext failed:',e); }
-}
-
-/* ── Audio events (consolidated, no duplicates) ── */
-audio.addEventListener('play', ()=>{
-  setPlaying(true);
-  if('mediaSession' in navigator) navigator.mediaSession.playbackState='playing';
-  if(currentIdx >= 0 && allTracks[currentIdx]) updateMediaSession(allTracks[currentIdx]);
-  startMediaSessionKeepalive();
-});
-audio.addEventListener('pause', ()=>{
-  setPlaying(false);
-  if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
-  stopMediaSessionKeepalive();
-});
-audio.addEventListener('ended', ()=>{
-  stopMediaSessionKeepalive();
-  if(!isRepeat) nextTrack();
-});
-audio.addEventListener('loadedmetadata', ()=>{
-  const t=fmt(audio.duration);
-  ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-  updatePositionState();
-});
-audio.addEventListener('timeupdate', ()=>{
-  if(!audio.duration) return;
-  // Update seek bar and time display (skip if user is dragging)
-  if(!isSeeking){
-    const pct=(audio.currentTime/audio.duration)*100;
-    ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
-    const t=fmt(audio.currentTime);
-    ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-  }
-  // Update position state every ~5s
-  if(audio.currentTime % 5 < 0.3) updatePositionState();
-});
-audio.addEventListener('error', ()=>{
-  if(!audio.src || audio.src === window.location.href) return;
-  showToast('播放錯誤，切換下一首…');
-  setTimeout(nextTrack, 1500);
-});
-
-/* Re-assert media session when screen wakes / tab becomes visible */
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible' && !audio.paused && currentIdx >= 0){
-    const track = allTracks[currentIdx];
-    if(track) updateMediaSession(track);
-  }
-});
-
-/* ── Viewport height stability (Android Chrome) ── */
-function setAppHeight(){ document.documentElement.style.setProperty('--app-height', window.innerHeight+'px'); }
-window.addEventListener('resize', setAppHeight);
-setAppHeight();
-
-/* ── Auth ── */
+/* ── Init ── */
 function init(){
-  if(!CLIENT_ID){ show('setup-screen'); }
-  else{ show('login-screen'); initAuth(); }
+  if(!CLIENT_ID){show('setup-screen');}
+  else{show('login-screen');initAuth();}
 }
 function show(id){
   ['setup-screen','login-screen','app'].forEach(s=>{
     const el=document.getElementById(s);
-    if(el) el.style.display = s===id ? (s==='app'?'flex':'flex') : 'none';
+    if(el)el.style.display=s===id?(s==='app'?'flex':'flex'):'none';
   });
 }
 function saveClientId(){
   const val=document.getElementById('client-id-input').value.trim();
-  if(!val.includes('apps.googleusercontent.com')){ showToast('請輸入有效的 Client ID'); return; }
-  CLIENT_ID=val; localStorage.setItem('drivemusic_cid',val);
+  if(!val.includes('apps.googleusercontent.com')){showToast('請輸入有效的 Client ID');return;}
+  CLIENT_ID=val;localStorage.setItem('drivemusic_cid',val);
   document.getElementById('setup-screen').style.display='none';
   document.getElementById('login-screen').style.display='flex';
   initAuth();
 }
-function resetClientId(){ localStorage.removeItem('drivemusic_cid'); location.reload(); }
+function resetClientId(){localStorage.removeItem('drivemusic_cid');location.reload();}
 function initAuth(){
   tokenClient=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:onToken});
 }
 function onToken(resp){
-  if(resp.error){ showToast('登入失敗：'+resp.error); return; }
+  if(resp.error){showToast('登入失敗：'+resp.error);return;}
   accessToken=resp.access_token;
   tokenExpiry=Date.now()+(resp.expires_in-120)*1000;
   document.getElementById('login-screen').style.display='none';
@@ -912,42 +833,44 @@ function onToken(resp){
   audio.volume=0.8;
   scheduleTokenRefresh(resp.expires_in);
   ['folder-display','mob-folder-display'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.textContent=currentFolderName;
+    const el=document.getElementById(id);if(el)el.textContent=currentFolderName;
   });
   loadFolders();
   loadFiles();
   fetchUserInfo();
-  if(!localStorage.getItem('swipe_hint_shown') && isMobile()){
+  // Show swipe hint once
+  if(!localStorage.getItem('swipe_hint_shown')&&isMobile()){
     setTimeout(()=>{
       const h=document.getElementById('swipe-hint');
-      if(h){ h.classList.add('show'); setTimeout(()=>h.classList.remove('show'),3000); }
+      if(h){h.classList.add('show');setTimeout(()=>h.classList.remove('show'),3000);}
       localStorage.setItem('swipe_hint_shown','1');
     },2000);
   }
 }
 function signIn(){
-  if(!tokenClient) initAuth();
-  claimAudioFocus();
-  registerMediaSessionHandlers();
+  if(!tokenClient)initAuth();
+  registerMediaSessionHandlers(); // register handlers early on first user gesture
   tokenClient.requestAccessToken({prompt:'consent'});
 }
 function signOut(){
-  if(!confirm('確定要登出嗎？')) return;
-  if(accessToken) google.accounts.oauth2.revoke(accessToken,()=>{});
-  accessToken=null; allTracks=[]; currentIdx=-1;
-  audio.pause(); setPlaying(false);
+  if(!confirm('確定要登出嗎？'))return;
+  if(accessToken)google.accounts.oauth2.revoke(accessToken,()=>{});
+  accessToken=null;allTracks=[];currentIdx=-1;
+  _isSwitchingTrack=false;
   stopMediaSessionKeepalive();
+  releasePlaybackLock();
+  audio.pause();audio.src='';setPlaying(false);
   document.getElementById('app').style.display='none';
   document.getElementById('login-screen').style.display='flex';
   closeUserMenu();
 }
 function scheduleTokenRefresh(expiresIn){
   const ms=(expiresIn-300)*1000;
-  setTimeout(()=>document.getElementById('token-warn').style.display='block', ms);
-  setTimeout(silentRefresh, ms+60000);
+  setTimeout(()=>document.getElementById('token-warn').style.display='block',ms);
+  setTimeout(silentRefresh,ms+60000);
 }
 function silentRefresh(){
-  if(tokenClient) tokenClient.requestAccessToken({prompt:''});
+  if(tokenClient)tokenClient.requestAccessToken({prompt:''});
   document.getElementById('token-warn').style.display='none';
 }
 async function fetchUserInfo(){
@@ -955,35 +878,44 @@ async function fetchUserInfo(){
     const r=await apiFetch('https://www.googleapis.com/oauth2/v1/userinfo');
     const initial=(r.name||'U')[0].toUpperCase();
     ['user-av','mob-user-av','mob-user-big-av'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.textContent=initial;
+      const el=document.getElementById(id);if(el)el.textContent=initial;
     });
-    const nameEl=document.getElementById('user-name'); if(nameEl) nameEl.textContent=r.name||'登出';
-    const sheetName=document.getElementById('mob-user-name-sheet'); if(sheetName) sheetName.textContent=r.name||'';
+    const nameEl=document.getElementById('user-name');if(nameEl)nameEl.textContent=r.name||'登出';
+    const sheetName=document.getElementById('mob-user-name-sheet');if(sheetName)sheetName.textContent=r.name||'';
   }catch(_){}
 }
 
-/* ── Mobile UI ── */
+/* ── Mobile view switching ── */
 let mobView='player';
 function switchMobView(view){
   mobView=view;
-  const player   = document.getElementById('player-main');
-  const library  = document.getElementById('mob-library');
-  const navPlayer= document.getElementById('nav-player');
-  const navLib   = document.getElementById('nav-library');
+  const player=document.getElementById('player-main');
+  const library=document.getElementById('mob-library');
+  const navPlayer=document.getElementById('nav-player');
+  const navLibrary=document.getElementById('nav-library');
   if(view==='player'){
-    player.classList.add('mob-active');    library.classList.remove('mob-active');
-    navPlayer.classList.add('active');     navLib.classList.remove('active');
+    player.classList.add('mob-active');
+    library.classList.remove('mob-active');
+    navPlayer.classList.add('active');
+    navLibrary.classList.remove('active');
+    // Re-measure marquee now that player is visible
     if(currentIdx>=0 && allTracks[currentIdx]){
       const name=allTracks[currentIdx].name.replace(/\.[^.]+$/,'');
       requestAnimationFrame(()=>setupMarquee('now-title',name));
     }
   }else{
-    player.classList.remove('mob-active'); library.classList.add('mob-active');
-    navPlayer.classList.remove('active');  navLib.classList.add('active');
+    player.classList.remove('mob-active');
+    library.classList.add('mob-active');
+    navPlayer.classList.remove('active');
+    navLibrary.classList.add('active');
   }
 }
-function openUserMenu(){ document.getElementById('mob-user-menu').classList.add('open'); }
-function closeUserMenu(){ document.getElementById('mob-user-menu').classList.remove('open'); }
+
+/* ── Mobile user menu ── */
+function openUserMenu(){document.getElementById('mob-user-menu').classList.add('open');}
+function closeUserMenu(){document.getElementById('mob-user-menu').classList.remove('open');}
+
+/* ── Mobile folder panel ── */
 function toggleMobFolderPanel(){
   const panel=document.getElementById('mob-folder-panel');
   const toggle=document.getElementById('mob-folder-toggle');
@@ -996,22 +928,21 @@ function toggleMobFolderPanel(){
 async function loadFiles(){
   ['track-list','mob-track-list'].forEach(id=>{
     const el=document.getElementById(id);
-    if(el) el.innerHTML='<div class="list-state"><div class="spinner"></div>掃描音樂檔案中…</div>';
+    if(el)el.innerHTML='<div class="list-state"><div class="spinner"></div>掃描音樂檔案中…</div>';
   });
   try{
     const mq=AUDIO_MIMES.map(m=>`mimeType='${m}'`).join(' or ');
     let q=`(${mq}) and trashed=false`;
-    if(currentFolderId) q+=` and '${currentFolderId}' in parents`;
-    let files=[], pageToken=null;
+    if(currentFolderId)q+=` and '${currentFolderId}' in parents`;
+    let files=[],pageToken=null;
     do{
-      const p=new URLSearchParams({q,pageSize:'1000',orderBy:'name',
-        fields:'nextPageToken,files(id,name,mimeType,size,thumbnailLink)'});
-      if(pageToken) p.set('pageToken',pageToken);
+      const p=new URLSearchParams({q,pageSize:'1000',orderBy:'name',fields:'nextPageToken,files(id,name,mimeType,size,thumbnailLink)'});
+      if(pageToken)p.set('pageToken',pageToken);
       const data=await apiFetch('https://www.googleapis.com/drive/v3/files?'+p);
       files=files.concat(data.files||[]);
       pageToken=data.nextPageToken;
     }while(pageToken);
-    allTracks=files; visibleTracks=files;
+    allTracks=files;visibleTracks=files;
     if(!files.length){
       const msg='<div class="list-state">🎵<br><br>找不到音樂檔案<br><small>支援：MP3、FLAC、WAV、OGG、M4A、AAC</small></div>';
       ['track-list','mob-track-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=msg;});
@@ -1020,54 +951,58 @@ async function loadFiles(){
       showToast(`找到 ${allTracks.length} 首歌曲`);
     }
   }catch(e){
-    const msg=`<div class="list-state" style="color:#b03030">載入失敗<br><small>${e.message}</small><br><br>
-      <button onclick="loadFiles()" style="color:var(--gold);background:none;border:none;cursor:pointer;font-size:.8rem">重試</button></div>`;
+    const msg=`<div class="list-state" style="color:#b03030">載入失敗<br><small>${e.message}</small><br><br><button onclick="loadFiles()" style="color:var(--gold);background:none;border:none;cursor:pointer;font-size:.8rem">重試</button></div>`;
     ['track-list','mob-track-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=msg;});
   }
 }
 async function apiFetch(url){
   const r=await fetch(url,{headers:{Authorization:`Bearer ${accessToken}`}});
-  if(!r.ok) throw new Error('API '+r.status);
+  if(!r.ok)throw new Error('API '+r.status);
   return r.json();
 }
 
 /* ── Render list ── */
 function renderList(tracks){
   visibleTracks=tracks;
-  const LONG=18;
-  const makeHtml=tracks=>tracks.map(t=>{
+  const LONG=18; // chars threshold for marquee
+  const makeHtml=(tracks)=>tracks.map(t=>{
     const gi=allTracks.indexOf(t);
     const active=gi===currentIdx;
     const name=t.name.replace(/\.[^.]+$/,'');
     const ext=t.name.split('.').pop();
-    const nameHtml=name.length>LONG
+    const isLong=name.length>LONG;
+    const nameHtml=isLong
       ? `<div class="t-name t-mq"><span class="t-mq-inner">${esc(name)}&nbsp;&nbsp;·&nbsp;&nbsp;${esc(name)}</span></div>`
       : `<div class="t-name">${esc(name)}</div>`;
     return `<div class="track-item${active?' active':''}" id="ti-${gi}" onclick="playTrack(${gi})">
       <div class="t-num">${active?'<div class="eq-anim"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>':(gi+1)}</div>
-      <div class="t-info">${nameHtml}<div class="t-ext">${esc(ext)}</div></div>
+      <div class="t-info">
+        ${nameHtml}
+        <div class="t-ext">${esc(ext)}</div>
+      </div>
     </div>`;
   }).join('');
+  const el=document.getElementById('track-list');
+  const mel=document.getElementById('mob-track-list');
   const html=tracks.length?makeHtml(tracks):'<div class="list-state">沒有符合的結果</div>';
-  const el=document.getElementById('track-list');   if(el) el.innerHTML=html;
-  const mel=document.getElementById('mob-track-list'); if(mel) mel.innerHTML=html;
+  if(el)el.innerHTML=html;
+  if(mel)mel.innerHTML=html;
 }
 function filterTracks(q,src){
-  if(src==='desktop'){ const m=document.getElementById('mob-search-input'); if(m&&m.value!==q) m.value=q; }
-  else               { const d=document.getElementById('search-input');     if(d&&d.value!==q) d.value=q; }
+  // sync both search inputs
+  if(src==='desktop'){const m=document.getElementById('mob-search-input');if(m&&m.value!==q)m.value=q;}
+  else{const d=document.getElementById('search-input');if(d&&d.value!==q)d.value=q;}
   const lq=q.toLowerCase();
-  renderList(lq ? allTracks.filter(t=>t.name.toLowerCase().includes(lq)) : allTracks);
+  renderList(lq?allTracks.filter(t=>t.name.toLowerCase().includes(lq)):allTracks);
 }
 
 /* ── Folder management ── */
 async function loadFolders(){
   try{
-    let folders=[], pageToken=null;
+    let folders=[],pageToken=null;
     do{
-      const p=new URLSearchParams({
-        q:"mimeType='application/vnd.google-apps.folder' and trashed=false",
-        pageSize:'1000',orderBy:'name',fields:'nextPageToken,files(id,name)'});
-      if(pageToken) p.set('pageToken',pageToken);
+      const p=new URLSearchParams({q:"mimeType='application/vnd.google-apps.folder' and trashed=false",pageSize:'1000',orderBy:'name',fields:'nextPageToken,files(id,name)'});
+      if(pageToken)p.set('pageToken',pageToken);
       const data=await apiFetch('https://www.googleapis.com/drive/v3/files?'+p);
       folders=folders.concat(data.files||[]);
       pageToken=data.nextPageToken;
@@ -1075,31 +1010,34 @@ async function loadFolders(){
     allFolders=folders;
     renderFolderList(folders);
   }catch(e){
-    ['fp-list','mob-fp-list'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.innerHTML='<div class="fp-empty">載入資料夾失敗</div>';
-    });
+    ['fp-list','mob-fp-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<div class="fp-empty">載入資料夾失敗</div>';});
   }
 }
 function renderFolderList(folders){
-  const html=folders.length
-    ? folders.map(f=>{
-        const active=f.id===currentFolderId?' active':'';
-        return `<button class="fp-item${active}" onclick="selectFolder('${esc(f.id)}','${esc(f.name)}')"><span class="fp-ico">📁</span>${esc(f.name)}</button>`;
-      }).join('')
-    : '<div class="fp-empty">沒有資料夾</div>';
+  const makeHtml=(folders)=>folders.length
+    ?folders.map(f=>{
+      const active=f.id===currentFolderId?' active':'';
+      return `<button class="fp-item${active}" onclick="selectFolder('${esc(f.id)}','${esc(f.name)}')"><span class="fp-ico">📁</span>${esc(f.name)}</button>`;
+    }).join('')
+    :'<div class="fp-empty">沒有資料夾</div>';
+  const html=makeHtml(folders);
   ['fp-list','mob-fp-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=html;});
 }
 function selectFolder(id,name){
-  currentFolderId=id; currentFolderName=name||'所有音樂';
+  currentFolderId=id;
+  currentFolderName=name||'所有音樂';
   localStorage.setItem('drivemusic_folder',id);
   localStorage.setItem('drivemusic_folder_name',currentFolderName);
   ['folder-display','mob-folder-display'].forEach(elId=>{
-    const el=document.getElementById(elId); if(el) el.textContent=currentFolderName;
+    const el=document.getElementById(elId);if(el)el.textContent=currentFolderName;
   });
   document.getElementById('fp-all').classList.toggle('active',!id);
-  const mobAll=document.getElementById('mob-fp-all'); if(mobAll) mobAll.classList.toggle('active',!id);
-  const sq=(document.getElementById('fp-search').value||document.getElementById('mob-fp-search').value||'').toLowerCase();
-  renderFolderList(sq ? allFolders.filter(f=>f.name.toLowerCase().includes(sq)) : allFolders);
+  const mobAll=document.getElementById('mob-fp-all');if(mobAll)mobAll.classList.toggle('active',!id);
+  renderFolderList(allFolders.filter(f=>{
+    const sq=document.getElementById('fp-search').value||document.getElementById('mob-fp-search').value||'';
+    return !sq||f.name.toLowerCase().includes(sq.toLowerCase());
+  }));
+  // Close panels
   ['folder-panel','mob-folder-panel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show');});
   ['folder-toggle','mob-folder-toggle'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('open');});
   currentIdx=-1;
@@ -1108,13 +1046,13 @@ function selectFolder(id,name){
 }
 function applyManualFolder(){
   const id=document.getElementById('fp-manual-id').value.trim();
-  if(!id){ showToast('請輸入資料夾 ID'); return; }
+  if(!id){showToast('請輸入資料夾 ID');return;}
   selectFolder(id,'自訂資料夾');
   document.getElementById('fp-manual-id').value='';
 }
 function applyManualFolderMob(){
   const id=document.getElementById('mob-fp-manual-id').value.trim();
-  if(!id){ showToast('請輸入資料夾 ID'); return; }
+  if(!id){showToast('請輸入資料夾 ID');return;}
   selectFolder(id,'自訂資料夾');
   document.getElementById('mob-fp-manual-id').value='';
 }
@@ -1127,128 +1065,282 @@ function toggleFolderPanel(){
 }
 function filterFolderList(q){
   const lq=q.toLowerCase();
-  renderFolderList(lq ? allFolders.filter(f=>f.name.toLowerCase().includes(lq)) : allFolders);
+  renderFolderList(lq?allFolders.filter(f=>f.name.toLowerCase().includes(lq)):allFolders);
 }
-function filterFolderListMob(q){ filterFolderList(q); }
+function filterFolderListMob(q){filterFolderList(q);}
 
-/* ── Token refresh ── */
+/* ── Token refresh helper (Promise-based) ── */
 function refreshTokenIfNeeded(){
+  // If token still has more than 3 min left, no need to refresh
   if(accessToken && Date.now() < tokenExpiry - 180000) return Promise.resolve();
-  return new Promise((resolve,reject)=>{
-    if(!tokenClient){ reject(new Error('no tokenClient')); return; }
-    const orig=tokenClient.callback;
-    tokenClient.callback=(resp)=>{
-      tokenClient.callback=orig;
-      if(resp.error){ reject(new Error(resp.error)); return; }
-      accessToken=resp.access_token;
-      tokenExpiry=Date.now()+(resp.expires_in-120)*1000;
+  return new Promise((resolve, reject)=>{
+    if(!tokenClient){reject(new Error('no tokenClient'));return;}
+    const orig = tokenClient.callback;
+    tokenClient.callback = (resp)=>{
+      tokenClient.callback = orig; // restore
+      if(resp.error){reject(new Error(resp.error));return;}
+      accessToken  = resp.access_token;
+      tokenExpiry  = Date.now() + (resp.expires_in - 120) * 1000;
       document.getElementById('token-warn').style.display='none';
       resolve();
     };
     tokenClient.requestAccessToken({prompt:''});
   });
 }
+
 async function fetchAudioWithRetry(fileId){
-  const tryFetch=async()=>fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    {headers:{Authorization:`Bearer ${accessToken}`}}
-  );
-  let resp=await tryFetch();
-  if(resp.status===401){
+  // First attempt
+  const tryFetch = async ()=>{
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      {headers:{Authorization:`Bearer ${accessToken}`}}
+    );
+    return resp;
+  };
+
+  let resp = await tryFetch();
+
+  // 401 → refresh token → retry once
+  if(resp.status === 401){
     showToast('Token 已過期，正在重新登入…');
-    await refreshTokenIfNeeded().catch(e=>{ throw new Error('Token 刷新失敗，請重新登入'); });
-    resp=await tryFetch();
+    try{
+      await refreshTokenIfNeeded();
+    }catch(e){
+      throw new Error('Token 刷新失敗，請重新登入');
+    }
+    resp = await tryFetch();
   }
-  if(!resp.ok) throw new Error('HTTP '+resp.status);
+
+  if(!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp;
 }
 
-/* ── Playback ── */
+function updateMediaSession(track){
+  if(!('mediaSession' in navigator) || !track) return;
+
+  const cleanName = (track.name || '').replace(/\.[^.]+$/, '');
+
+  // Always use data URI artwork — thumbnailLink needs auth token,
+  // the notification system can't load it and shows nothing
+  const artwork = [{
+    src: DEFAULT_ARTWORK,
+    sizes: '96x96',
+    type: 'image/svg+xml'
+  }];
+
+  try{
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: cleanName,
+      artist: 'Drive Music',
+      album: currentFolderName || 'Google Drive',
+      artwork
+    });
+  }catch(e){
+    console.warn('MediaMetadata failed:', e);
+  }
+
+  navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+  registerMediaSessionHandlers(); // re-register in case Vivo OS cleared them
+  updatePositionState();
+}
+
+function updatePositionState(){
+  if(!('mediaSession' in navigator)) return;
+
+  try{
+    if(audio.duration && isFinite(audio.duration)){
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        playbackRate: audio.playbackRate || 1,
+        position: audio.currentTime
+      });
+    }
+  }catch(e){}
+}
+
+/* ── Audio events ── */
+audio.addEventListener('play',()=>{
+  setPlaying(true);
+  if('mediaSession' in navigator) navigator.mediaSession.playbackState='playing';
+  if(currentIdx>=0&&allTracks[currentIdx]) updateMediaSession(allTracks[currentIdx]);
+  startMediaSessionKeepalive();
+});
+audio.addEventListener('pause',()=>{
+  setPlaying(false);
+  if(!_isSwitchingTrack){
+    // Genuine user pause — update session state, stop keepalive, release lock
+    if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
+    stopMediaSessionKeepalive();
+    releasePlaybackLock();
+  }
+  // If _isSwitchingTrack: keepalive keeps running, session stays 'playing', lock stays held
+});
+audio.addEventListener('timeupdate',()=>{
+  if(!audio.duration)return;
+  const pct=(audio.currentTime/audio.duration)*100;
+  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
+  const t=fmt(audio.currentTime);
+  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  if(audio.currentTime%5<0.3) updatePositionState();
+});
+audio.addEventListener('loadedmetadata',()=>{
+  const t=fmt(audio.duration);
+  ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  updatePositionState();
+});
+audio.addEventListener('ended',()=>{
+  // Don't release lock here — nextTrack → playTrack will re-acquire.
+  // Only stop the keepalive; it restarts on the next audio.play().
+  stopMediaSessionKeepalive();
+  if(!isRepeat)nextTrack();
+});
+audio.addEventListener('error',()=>{
+  if(!audio.src||audio.src===window.location.href)return;
+  showToast('播放錯誤，切換下一首…');
+  setTimeout(nextTrack,1500);
+});
+
+/* ── Visibility: re-assert media session when tab comes back ── */
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&!audio.paused&&currentIdx>=0&&allTracks[currentIdx])
+    updateMediaSession(allTracks[currentIdx]);
+});
+
+
+/* ── Page Lifecycle (Chrome may freeze JS when screen is off)
+   'freeze' = JS suspended; 'resume' = JS unfrozen.
+   On resume, re-assert media session and restart keepalive.
+── */
+document.addEventListener('resume',()=>{
+  if(currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
+    updateMediaSession(allTracks[currentIdx]);
+    startMediaSessionKeepalive();
+  }
+});
+window.addEventListener('pageshow',(e)=>{
+  if(e.persisted&&currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
+    updateMediaSession(allTracks[currentIdx]);
+    startMediaSessionKeepalive();
+  }
+});
+
+/* ── Web Locks: hold a lock while playing to discourage Chrome from freezing the page ── */
+let _releaseLock=null;
+function acquirePlaybackLock(){
+  if(!('locks' in navigator)||_releaseLock)return;
+  navigator.locks.request('drive-music-playback',{mode:'shared'},()=>
+    new Promise(resolve=>{_releaseLock=resolve;})
+  ).catch(()=>{});
+}
+function releasePlaybackLock(){
+  if(_releaseLock){_releaseLock();_releaseLock=null;}
+}
+
 async function playTrack(idx){
-  if(idx<0||idx>=allTracks.length) return;
-  const reqId=++playReqId;
+  if(idx<0||idx>=allTracks.length)return;
+
+  const reqId=++playReqId; // unique ID for this request
+
   currentIdx=idx;
   const t=allTracks[idx];
   const name=t.name.replace(/\.[^.]+$/,'');
   const ext=(t.name.split('.').pop()||'audio').toUpperCase();
 
-  // Optimistic UI update
+  // ── Step 1: Update lockscreen metadata IMMEDIATELY ────────────
+  // Old track keeps playing; Vivo sees new title in notification
+  // right away and never gets a chance to show another app.
+  if('mediaSession' in navigator){
+    try{
+      navigator.mediaSession.metadata=new MediaMetadata({
+        title:name,artist:'Drive Music',
+        album:currentFolderName||'Google Drive',
+        artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
+      });
+      // Keep playbackState as 'playing' — old audio still running
+      navigator.mediaSession.playbackState='playing';
+    }catch(_){}
+    registerMediaSessionHandlers();
+  }
+
+  // ── Step 2: Update UI ─────────────────────────────────────────
   setupMarquee('now-title',name);
   if(isMobile()&&mobView!=='player') switchMobView('player');
   document.getElementById('now-ext').textContent=ext;
   document.getElementById('now-folder-name').textContent=currentFolderName;
   document.title=`♪ ${name}`;
   const mt=document.getElementById('mini-title');
-  if(mt){ mt.textContent=name; mt.classList.remove('idle'); }
+  if(mt){mt.textContent=name;mt.classList.remove('idle');}
   const mf=document.getElementById('mini-folder');
-  if(mf) mf.textContent=currentFolderName;
+  if(mf)mf.textContent=currentFolderName;
   const label=document.getElementById('vinyl-label');
-  label.innerHTML=t.thumbnailLink
-    ? `<img src="${t.thumbnailLink}" alt="">`
-    : '<span class="vinyl-label-icon">♪</span>';
+  label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`: '<span class="vinyl-label-icon">♪</span>';
 
-  audio.pause();
+  // NOTE: audio.pause() is intentionally NOT called here.
+  // Old audio keeps playing during the fetch so the OS sees
+  // continuous playback and never reclaims media focus.
+
   renderList(visibleTracks);
   setTimeout(()=>{
     document.querySelectorAll(`#ti-${idx}`).forEach(el=>el.scrollIntoView({behavior:'smooth',block:'nearest'}));
   },50);
 
+  // ── Step 3: Fetch blob while old audio plays ──────────────────
   try{
     showToast(`載入中：${name}`);
     await refreshTokenIfNeeded();
-    if(reqId!==playReqId) return;
+    if(reqId!==playReqId)return; // stale: user picked another song
 
     const resp=await fetchAudioWithRetry(t.id);
-    if(reqId!==playReqId) return;
+    if(reqId!==playReqId)return; // stale
 
     const blob=await resp.blob();
-    if(reqId!==playReqId) return;
+    if(reqId!==playReqId)return; // stale
 
-    if(currentBlobUrl){ URL.revokeObjectURL(currentBlobUrl); currentBlobUrl=null; }
-    currentBlobUrl=URL.createObjectURL(blob);
+    const newUrl=URL.createObjectURL(blob);
+
+    // ── Step 4: Atomic switch — pause is now milliseconds ─────
+    // _isSwitchingTrack prevents the pause event from touching
+    // the media session or killing the keepalive.
+    _isSwitchingTrack=true;
+    audio.pause();
+    if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
+    currentBlobUrl=newUrl;
     audio.src=currentBlobUrl;
     await audio.play();
-    updateMediaSession(t);
+    _isSwitchingTrack=false;
+    acquirePlaybackLock();       // hold Web Lock to discourage page freeze
+    updateMediaSession(t);       // final assert with real duration now available
   }catch(e){
-    if(reqId!==playReqId) return;
+    _isSwitchingTrack=false;
+    if(reqId!==playReqId)return; // stale error, ignore
     console.error('playTrack error:',e);
     showToast('載入失敗：'+e.message);
     setTimeout(nextTrack,2000);
   }
 }
 function togglePlay(){
-  if(currentIdx===-1&&allTracks.length){ playTrack(0); return; }
-  if(audio.paused) audio.play().catch(()=>{}); else audio.pause();
+  if(currentIdx===-1&&allTracks.length){playTrack(0);return;}
+  if(audio.paused)audio.play().catch(()=>{});else audio.pause();
 }
 function nextTrack(){
-  if(!allTracks.length) return;
-  if(isShuffle){ playTrack(Math.floor(Math.random()*allTracks.length)); return; }
+  if(!allTracks.length)return;
+  if(isShuffle){playTrack(Math.floor(Math.random()*allTracks.length));return;}
   playTrack((currentIdx+1)%allTracks.length);
 }
 function prevTrack(){
-  if(!allTracks.length) return;
-  if(audio.currentTime>3){ audio.currentTime=0; return; }
+  if(!allTracks.length)return;
+  if(audio.currentTime>3){audio.currentTime=0;return;}
   playTrack((currentIdx-1+allTracks.length)%allTracks.length);
 }
-function previewSeek(v){
-  if(!audio.duration) return;
-  const t=fmt((v/100)*audio.duration);
-  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-}
-function commitSeek(v){
-  isSeeking=false;
-  if(!audio.duration) return;
-  audio.currentTime=(v/100)*audio.duration;
-  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=v;});
-}
-function setVolume(v){ audio.volume=v/100; }
+function seekAudio(v){if(audio.duration)audio.currentTime=(v/100)*audio.duration;}
+function setVolume(v){audio.volume=v/100;}
 function toggleShuffle(){
   isShuffle=!isShuffle;
   document.getElementById('shuffle-btn').classList.toggle('on',isShuffle);
   showToast(isShuffle?'隨機播放：開':'隨機播放：關');
 }
 function toggleRepeat(){
-  isRepeat=!isRepeat; audio.loop=isRepeat;
+  isRepeat=!isRepeat;audio.loop=isRepeat;
   document.getElementById('repeat-btn').classList.toggle('on',isRepeat);
   showToast(isRepeat?'重複播放：開':'重複播放：關');
 }
@@ -1258,33 +1350,35 @@ function setPlaying(p){
   const v=document.getElementById('vinyl-disc');
   p?v.classList.add('spinning'):v.classList.remove('spinning');
   const md=document.getElementById('mini-disc');
-  if(md){ p?md.classList.add('spinning'):md.classList.remove('spinning'); }
+  if(md){p?md.classList.add('spinning'):md.classList.remove('spinning');}
 }
 
-/* ── Swipe gestures (mobile) ── */
-let _sx=null, _sy=null;
+/* ── Swipe gestures on player (mobile) ── *//* ── Swipe gestures on player (mobile) ── */
+let _sx=null,_sy=null;
 document.getElementById('player-main').addEventListener('touchstart',e=>{
-  _sx=e.touches[0].clientX; _sy=e.touches[0].clientY;
+  _sx=e.touches[0].clientX;_sy=e.touches[0].clientY;
 },{passive:true});
 document.getElementById('player-main').addEventListener('touchend',e=>{
-  if(_sx===null) return;
+  if(_sx===null)return;
   const dx=e.changedTouches[0].clientX-_sx;
   const dy=e.changedTouches[0].clientY-_sy;
-  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>48){ dx<0?nextTrack():prevTrack(); }
-  _sx=null; _sy=null;
+  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>48){
+    dx<0?nextTrack():prevTrack();
+  }
+  _sx=null;_sy=null;
 },{passive:true});
 
 /* ── Keyboard shortcuts ── */
 document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT') return;
+  if(e.target.tagName==='INPUT')return;
   switch(e.code){
-    case 'Space':      e.preventDefault(); togglePlay(); break;
-    case 'ArrowRight': audio.currentTime=Math.min(audio.currentTime+10,audio.duration||0); break;
-    case 'ArrowLeft':  audio.currentTime=Math.max(audio.currentTime-10,0); break;
-    case 'ArrowUp':    audio.volume=Math.min(audio.volume+.1,1); document.getElementById('vol-bar').value=audio.volume*100; break;
-    case 'ArrowDown':  audio.volume=Math.max(audio.volume-.1,0); document.getElementById('vol-bar').value=audio.volume*100; break;
-    case 'KeyN':       nextTrack(); break;
-    case 'KeyP':       prevTrack(); break;
+    case 'Space':      e.preventDefault();togglePlay();break;
+    case 'ArrowRight': audio.currentTime=Math.min(audio.currentTime+10,audio.duration||0);break;
+    case 'ArrowLeft':  audio.currentTime=Math.max(audio.currentTime-10,0);break;
+    case 'ArrowUp':    audio.volume=Math.min(audio.volume+.1,1);document.getElementById('vol-bar').value=audio.volume*100;break;
+    case 'ArrowDown':  audio.volume=Math.max(audio.volume-.1,0);document.getElementById('vol-bar').value=audio.volume*100;break;
+    case 'KeyN':       nextTrack();break;
+    case 'KeyP':       prevTrack();break;
   }
 });
 
@@ -1292,7 +1386,7 @@ document.addEventListener('keydown',e=>{
 function setupMarquee(elId,text){
   const wrap=document.getElementById(elId);
   const inner=wrap.querySelector('.marquee-inner');
-  if(!inner){ wrap.textContent=text; return; }
+  if(!inner){wrap.textContent=text;return;}
   wrap.classList.remove('scrolling');
   inner.textContent=text;
   requestAnimationFrame(()=>{
@@ -1305,7 +1399,7 @@ function setupMarquee(elId,text){
   });
 }
 
-/* ── Responsive ── */
+/* ── Responsive: show/hide mobile seek bar ── */
 function applyResponsive(){
   const mob=isMobile();
   document.getElementById('mob-nav').style.display=mob?'flex':'none';
@@ -1314,22 +1408,22 @@ function applyResponsive(){
     document.getElementById('mob-library').classList.remove('mob-active');
   }
 }
-window.addEventListener('resize', applyResponsive);
+window.addEventListener('resize',applyResponsive);
 
 /* ── Utils ── */
-function fmt(s){ if(!isFinite(s)) return '0:00'; return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function fmt(s){if(!isFinite(s))return'0:00';return`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 let _tt;
 function showToast(msg){
-  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
-  clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),2500);
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('show'),2500);
 }
 
 /* ── Start ── */
 window.addEventListener('load',()=>{
-  setAppHeight();
   applyResponsive();
-  if(isMobile()) switchMobView('player');
+  // default mobile view = player
+  if(isMobile())switchMobView('player');
   init();
 });
 </script>
