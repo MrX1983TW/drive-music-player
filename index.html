@@ -237,9 +237,6 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
   .ctrl-btn{padding:10px;}
   .play-btn{width:60px;height:60px;}
 
-  /* Volume row smaller on mobile */
-  .vol-row{max-width:280px;}
-
   /* ── Mobile Library Panel ── */
   #mob-library{
     display:none;
@@ -302,7 +299,6 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 
   /* ── Mini player (shows in Library view) ── */
   .mini-player{
-    display:none;
     align-items:center;gap:12px;
     background:var(--surface);
     border-top:1px solid var(--border);
@@ -763,14 +759,7 @@ function stopMediaSessionKeepalive(){
   if(_keepaliveTimer){ clearInterval(_keepaliveTimer); _keepaliveTimer=null; }
 }
 
-// When screen wakes up / user returns to browser, re-assert immediately
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible' && !audio.paused && currentIdx >= 0){
-    const track = allTracks[currentIdx];
-    if(track) updateMediaSession(track);
-  }
-});
-   Avoid hijacking audio through MediaElementSource on Android.
+/* ── Avoid hijacking audio through MediaElementSource on Android.
    Many ROMs stop exposing lockscreen / notification controls when
    audio is routed through WebAudio unnecessarily.
 ── */
@@ -1176,38 +1165,45 @@ function updatePositionState(){
   }catch(e){}
 }
 
-audio.addEventListener('play', ()=>{
-  if('mediaSession' in navigator){
-    navigator.mediaSession.playbackState='playing';
-  }
-  if(currentIdx >= 0 && allTracks[currentIdx]){
-    updateMediaSession(allTracks[currentIdx]);
-  }
+/* ── Audio events ── */
+audio.addEventListener('play',()=>{
+  setPlaying(true);
+  if('mediaSession' in navigator) navigator.mediaSession.playbackState='playing';
+  if(currentIdx>=0&&allTracks[currentIdx]) updateMediaSession(allTracks[currentIdx]);
   startMediaSessionKeepalive();
 });
-
-audio.addEventListener('pause', ()=>{
-  if('mediaSession' in navigator){
-    navigator.mediaSession.playbackState='paused';
-  }
+audio.addEventListener('pause',()=>{
+  setPlaying(false);
+  if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
   stopMediaSessionKeepalive();
 });
-
-audio.addEventListener('ended', ()=>{
+audio.addEventListener('timeupdate',()=>{
+  if(!audio.duration)return;
+  const pct=(audio.currentTime/audio.duration)*100;
+  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
+  const t=fmt(audio.currentTime);
+  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  if(audio.currentTime%5<0.3) updatePositionState();
+});
+audio.addEventListener('loadedmetadata',()=>{
+  const t=fmt(audio.duration);
+  ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+  updatePositionState();
+});
+audio.addEventListener('ended',()=>{
   stopMediaSessionKeepalive();
+  if(!isRepeat)nextTrack();
+});
+audio.addEventListener('error',()=>{
+  if(!audio.src||audio.src===window.location.href)return;
+  showToast('播放錯誤，切換下一首…');
+  setTimeout(nextTrack,1500);
 });
 
-audio.addEventListener('loadedmetadata', updatePositionState);
-audio.addEventListener('timeupdate', ()=>{
-  if(audio.currentTime % 5 < 0.3){
-    updatePositionState();
-  }
-});
-
-document.addEventListener('visibilitychange', ()=>{
-  if(!document.hidden && currentIdx >= 0 && allTracks[currentIdx]){
+/* ── Visibility: re-assert media session when tab comes back ── */
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&!audio.paused&&currentIdx>=0&&allTracks[currentIdx])
     updateMediaSession(allTracks[currentIdx]);
-  }
 });
 
 
@@ -1300,50 +1296,7 @@ function setPlaying(p){
   if(md){p?md.classList.add('spinning'):md.classList.remove('spinning');}
 }
 
-/* ── Audio events ── */
-audio.addEventListener('play',()=>{
-  setPlaying(true);
-  if('mediaSession' in navigator) navigator.mediaSession.playbackState='playing';
-});
-audio.addEventListener('pause',()=>{
-  setPlaying(false);
-  if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
-});
-audio.addEventListener('timeupdate',()=>{
-  if(!audio.duration)return;
-  const pct=(audio.currentTime/audio.duration)*100;
-  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
-  const t=fmt(audio.currentTime);
-  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-});
-audio.addEventListener('loadedmetadata',()=>{
-  const t=fmt(audio.duration);
-  ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-});
-audio.addEventListener('ended',()=>{if(!isRepeat)nextTrack();});
-audio.addEventListener('error',()=>{
-  if(!audio.src||audio.src===window.location.href)return;
-  showToast('播放錯誤，切換下一首…');
-  setTimeout(nextTrack,1500);
-});
-
-/* ── Media Session API ── */
-const DEFAULT_ARTWORK='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="12" fill="#c9a44a"/><text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text></svg>');
-
-function updateMediaSession(track){
-  if(!('mediaSession' in navigator))return;
-  const name=track.name.replace(/\.[^.]+$/,'');
-  navigator.mediaSession.metadata=new MediaMetadata({
-    title:name,
-    artist:'Drive Music',
-    album:currentFolderName,
-    artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
-  });
-  // Re-register handlers here too in case they got cleared by another app
-  registerMediaSessionHandlers();
-}
-
-/* ── Swipe gestures on player (mobile) ── */
+/* ── Swipe gestures on player (mobile) ── *//* ── Swipe gestures on player (mobile) ── */
 let _sx=null,_sy=null;
 document.getElementById('player-main').addEventListener('touchstart',e=>{
   _sx=e.touches[0].clientX;_sy=e.touches[0].clientY;
