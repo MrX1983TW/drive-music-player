@@ -711,7 +711,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
 
 </div><!-- /app -->
 
-<audio id="audio" preload="none"></audio>
+<audio id="audio" preload="none" controls style="display:none;position:absolute;width:0;height:0;"></audio>
 <div class="toast" id="toast"></div>
 <script src="https://accounts.google.com/gsi/client"></script>
 <script>
@@ -732,6 +732,36 @@ let playReqId=0; // increments each playTrack call; stale fetches check against 
 let isMobile=()=>window.innerWidth<=640;
 
 const audio=document.getElementById('audio');
+
+/* ── Audio focus: claim highest priority via AudioContext ──
+   Must be triggered from a user gesture (first login click counts)
+   This is what beats YouTube Music / other apps on Android
+── */
+let _audioCtx=null;
+function claimAudioFocus(){
+  if(_audioCtx) return;
+  try{
+    _audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=_audioCtx.createMediaElementSource(audio);
+    src.connect(_audioCtx.destination);
+    if(_audioCtx.state==='suspended') _audioCtx.resume();
+  }catch(e){ console.warn('AudioContext failed:',e); }
+}
+
+/* ── Register Media Session handlers early (before any playback)
+   Android Chrome shows notification as soon as handlers are registered
+   and audio starts playing — not just when metadata is set
+── */
+function registerMediaSessionHandlers(){
+  if(!('mediaSession' in navigator)) return;
+  navigator.mediaSession.setActionHandler('play',          ()=>audio.play());
+  navigator.mediaSession.setActionHandler('pause',         ()=>audio.pause());
+  navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
+  navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
+  navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
+  try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
+}
 
 /* ── Init ── */
 function init(){
@@ -780,7 +810,12 @@ function onToken(resp){
     },2000);
   }
 }
-function signIn(){if(!tokenClient)initAuth();tokenClient.requestAccessToken({prompt:'consent'});}
+function signIn(){
+  if(!tokenClient)initAuth();
+  claimAudioFocus();           // grab audio focus on first user gesture
+  registerMediaSessionHandlers(); // register handlers early
+  tokenClient.requestAccessToken({prompt:'consent'});
+}
 function signOut(){
   if(!confirm('確定要登出嗎？'))return;
   if(accessToken)google.accounts.oauth2.revoke(accessToken,()=>{});
@@ -1130,8 +1165,14 @@ function setPlaying(p){
 }
 
 /* ── Audio events ── */
-audio.addEventListener('play',()=>setPlaying(true));
-audio.addEventListener('pause',()=>setPlaying(false));
+audio.addEventListener('play',()=>{
+  setPlaying(true);
+  if('mediaSession' in navigator) navigator.mediaSession.playbackState='playing';
+});
+audio.addEventListener('pause',()=>{
+  setPlaying(false);
+  if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
+});
 audio.addEventListener('timeupdate',()=>{
   if(!audio.duration)return;
   const pct=(audio.currentTime/audio.duration)*100;
@@ -1162,13 +1203,8 @@ function updateMediaSession(track){
     album:currentFolderName,
     artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
   });
-  navigator.mediaSession.setActionHandler('play',          ()=>audio.play());
-  navigator.mediaSession.setActionHandler('pause',         ()=>audio.pause());
-  navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
-  navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
-  navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
-  navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
-  try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
+  // Re-register handlers here too in case they got cleared by another app
+  registerMediaSessionHandlers();
 }
 
 /* ── Swipe gestures on player (mobile) ── */
