@@ -716,6 +716,35 @@ let CLIENT_ID = localStorage.getItem('drivemusic_cid') || '';
 const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
 const AUDIO_MIMES = ['audio/mpeg','audio/mp3','audio/mp4','audio/flac','audio/wav','audio/x-wav','audio/ogg','audio/aac','audio/x-m4a','audio/webm','audio/x-flac','audio/opus'];
 
+/* ══════════════════════════════════════════════════════════════════
+   PLAYBACK ENGINE  v2  —  clean rewrite
+   ══════════════════════════════════════════════════════════════════
+   Architecture
+   ─────────────
+   fetch-first: old audio keeps playing while the new blob is fetched.
+   No silence during loading; playbackState stays 'playing' the whole
+   time so Android never reclaims media focus.
+
+   _isSwitchingTrack: set at the top of every playTrack call, cleared
+   only after audio.play() resolves. Guards pause/ended events from
+   acting on what is just a mid-switch state change.
+
+   Two-tier keepalive
+   • Normal (2 s) — runs while audio is actually playing; re-asserts
+     full MediaSession metadata + position state.
+   • Switch (500 ms) — runs only during the atomic pause→play gap
+     at the end of playTrack; forces playbackState='playing' so Vivo
+     doesn't reclaim the notification in that ~100–500 ms window.
+
+   stale-check pattern: every await in playTrack is followed by
+   if(reqId!==playReqId) return bail(); so late-resolving fetches
+   from abandoned requests never touch the DOM or audio element.
+
+   Web Locks: a shared lock is held while audio plays, signalling to
+   Chrome that the page has ongoing work and reducing the chance of
+   the JS thread being frozen when the screen turns off.
+   ══════════════════════════════════════════════════════════════════ */
+
 /* ── State ── */
 let tokenClient=null,accessToken=null,tokenExpiry=0;
 let allTracks=[],visibleTracks=[],currentIdx=-1;
@@ -724,36 +753,29 @@ let currentFolderId=localStorage.getItem('drivemusic_folder')||'';
 let currentFolderName=localStorage.getItem('drivemusic_folder_name')||'所有音樂';
 let allFolders=[];
 let currentBlobUrl=null;
-let playReqId=0; // increments each playTrack call; stale fetches check against this
-let _isSwitchingTrack=false; // true during inter-track gap; prevents Vivo from reclaiming media focus
-let _isSeeking=false;        // true while user drags seek bar; blocks timeupdate from overwriting position
-let isMobile=()=>window.innerWidth<=640;
+let playReqId=0;             // increments on every playTrack call
+let _isSwitchingTrack=false; // true from playTrack start until audio.play() resolves
+let _isSeeking=false;        // true while user is dragging a seek bar
+const isMobile=()=>window.innerWidth<=640;
 
 const audio=document.getElementById('audio');
 
-/* ── Media Session constants ── */
-const DEFAULT_ARTWORK = 'data:image/svg+xml,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">' +
-  '<rect width="96" height="96" rx="12" fill="#c9a44a"/>' +
-  '<text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text>' +
+/* ── Artwork (data URI — works without auth in Android notifications) ── */
+const DEFAULT_ARTWORK='data:image/svg+xml,'+encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">'+
+  '<rect width="96" height="96" rx="12" fill="#c9a44a"/>'+
+  '<text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text>'+
   '</svg>'
 );
 
-/* ── Two-tier keepalive for Vivo / Funtouch OS ─────────────────
-   Normal keepalive (2 s): re-asserts metadata while audio plays.
-   Switch keepalive (500 ms): fires during the fetch gap between
-   tracks, forcing playbackState='playing' so Vivo never sees a
-   pause long enough to reclaim media focus.
-   The two are independent; switch keepalive is stopped the moment
-   the new audio.play() call succeeds.
-─────────────────────────────────────────────────────────────── */
+/* ── Keepalive ── */
 let _keepaliveTimer=null;
 let _switchKeepaliveTimer=null;
 
 function startMediaSessionKeepalive(){
   stopMediaSessionKeepalive();
   _keepaliveTimer=setInterval(()=>{
-    if(currentIdx<0||audio.paused)return;
+    if(audio.paused||currentIdx<0)return;
     const track=allTracks[currentIdx];
     if(!track||!('mediaSession' in navigator))return;
     updateMediaSession(track);
@@ -763,7 +785,6 @@ function startMediaSessionKeepalive(){
 function stopMediaSessionKeepalive(){
   if(_keepaliveTimer){clearInterval(_keepaliveTimer);_keepaliveTimer=null;}
 }
-
 function startSwitchKeepalive(){
   stopSwitchKeepalive();
   _switchKeepaliveTimer=setInterval(()=>{
@@ -776,27 +797,62 @@ function stopSwitchKeepalive(){
   if(_switchKeepaliveTimer){clearInterval(_switchKeepaliveTimer);_switchKeepaliveTimer=null;}
 }
 
-/* ── Register Media Session handlers early (before any playback)
-   Android Chrome shows notification as soon as handlers are registered
-   and audio starts playing — not just when metadata is set
-── */
+/* ── Media Session ── */
 function registerMediaSessionHandlers(){
-  if(!('mediaSession' in navigator)) return;
-  navigator.mediaSession.setActionHandler('play', async ()=>{
-    try{
-      await audio.play();
-      navigator.mediaSession.playbackState='playing';
-    }catch(e){}
+  if(!('mediaSession' in navigator))return;
+  navigator.mediaSession.setActionHandler('play',async()=>{
+    try{await audio.play();navigator.mediaSession.playbackState='playing';}catch(_){}
   });
-  navigator.mediaSession.setActionHandler('pause', ()=>{
-    audio.pause();
-    navigator.mediaSession.playbackState='paused';
+  navigator.mediaSession.setActionHandler('pause',()=>{
+    audio.pause();navigator.mediaSession.playbackState='paused';
   });
-  navigator.mediaSession.setActionHandler('previoustrack', ()=>prevTrack());
-  navigator.mediaSession.setActionHandler('nexttrack',     ()=>nextTrack());
-  navigator.mediaSession.setActionHandler('seekbackward',  (d)=>{ audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10)); });
-  navigator.mediaSession.setActionHandler('seekforward',   (d)=>{ audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10)); });
-  try{ navigator.mediaSession.setActionHandler('seekto',(d)=>{ audio.currentTime=d.seekTime; }); }catch(_){}
+  navigator.mediaSession.setActionHandler('previoustrack',()=>prevTrack());
+  navigator.mediaSession.setActionHandler('nexttrack',()=>nextTrack());
+  navigator.mediaSession.setActionHandler('seekbackward',(d)=>{
+    audio.currentTime=Math.max(0,audio.currentTime-(d.seekOffset||10));
+  });
+  navigator.mediaSession.setActionHandler('seekforward',(d)=>{
+    audio.currentTime=Math.min(audio.duration||0,audio.currentTime+(d.seekOffset||10));
+  });
+  try{navigator.mediaSession.setActionHandler('seekto',(d)=>{audio.currentTime=d.seekTime;});}catch(_){}
+}
+function updateMediaSession(track){
+  if(!('mediaSession' in navigator)||!track)return;
+  try{
+    navigator.mediaSession.metadata=new MediaMetadata({
+      title:(track.name||'').replace(/\.[^.]+$/,''),
+      artist:'Drive Music',
+      album:currentFolderName||'Google Drive',
+      artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
+    });
+  }catch(e){console.warn('MediaMetadata failed:',e);}
+  navigator.mediaSession.playbackState=audio.paused?'paused':'playing';
+  registerMediaSessionHandlers();
+  updatePositionState();
+}
+function updatePositionState(){
+  if(!('mediaSession' in navigator))return;
+  try{
+    if(audio.duration&&isFinite(audio.duration)){
+      navigator.mediaSession.setPositionState({
+        duration:audio.duration,
+        playbackRate:audio.playbackRate||1,
+        position:audio.currentTime
+      });
+    }
+  }catch(_){}
+}
+
+/* ── Web Locks ── */
+let _releaseLock=null;
+function acquirePlaybackLock(){
+  if(!('locks' in navigator)||_releaseLock)return;
+  navigator.locks.request('drive-music-playback',{mode:'shared'},()=>
+    new Promise(resolve=>{_releaseLock=resolve;})
+  ).catch(()=>{});
+}
+function releasePlaybackLock(){
+  if(_releaseLock){_releaseLock();_releaseLock=null;}
 }
 
 
@@ -1122,154 +1178,96 @@ async function fetchAudioWithRetry(fileId){
   return resp;
 }
 
-function updateMediaSession(track){
-  if(!('mediaSession' in navigator) || !track) return;
-
-  const cleanName = (track.name || '').replace(/\.[^.]+$/, '');
-
-  // Always use data URI artwork — thumbnailLink needs auth token,
-  // the notification system can't load it and shows nothing
-  const artwork = [{
-    src: DEFAULT_ARTWORK,
-    sizes: '96x96',
-    type: 'image/svg+xml'
-  }];
-
-  try{
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: cleanName,
-      artist: 'Drive Music',
-      album: currentFolderName || 'Google Drive',
-      artwork
-    });
-  }catch(e){
-    console.warn('MediaMetadata failed:', e);
-  }
-
-  navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
-  registerMediaSessionHandlers(); // re-register in case Vivo OS cleared them
-  updatePositionState();
-}
-
-function updatePositionState(){
-  if(!('mediaSession' in navigator)) return;
-
-  try{
-    if(audio.duration && isFinite(audio.duration)){
-      navigator.mediaSession.setPositionState({
-        duration: audio.duration,
-        playbackRate: audio.playbackRate || 1,
-        position: audio.currentTime
-      });
-    }
-  }catch(e){}
-}
-
-/* ── Audio events ── */
+/* ══════════════════════════════════════════════════════════════════
+   AUDIO EVENTS  (definitive set — no duplicates)
+   ══════════════════════════════════════════════════════════════════ */
 audio.addEventListener('play',()=>{
   setPlaying(true);
   if('mediaSession' in navigator) navigator.mediaSession.playbackState='playing';
   if(currentIdx>=0&&allTracks[currentIdx]) updateMediaSession(allTracks[currentIdx]);
   startMediaSessionKeepalive();
+  acquirePlaybackLock();
 });
+
 audio.addEventListener('pause',()=>{
   setPlaying(false);
-  if(_isSwitchingTrack)return; // playTrack manages keepalives; don't touch them here
-  // Genuine user pause
+  if(_isSwitchingTrack)return; // playTrack is managing state; hands off
   if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
   stopMediaSessionKeepalive();
   releasePlaybackLock();
 });
+
+audio.addEventListener('ended',()=>{
+  stopMediaSessionKeepalive();
+  if(_isSwitchingTrack)return; // fetch-first: old track ended mid-fetch; playTrack handles next
+  if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});return;}
+  nextTrack();
+});
+
+audio.addEventListener('loadedmetadata',()=>{
+  ['dur-time','dur-time-m'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.textContent=fmt(audio.duration);
+  });
+  updatePositionState();
+});
+
 audio.addEventListener('timeupdate',()=>{
-  // Backup for when 'ended' event is missed while page is frozen (screen off)
-  // Guard _isSeeking: seeking near end must NOT trigger nextTrack
+  // Backup: catch 'ended' events missed while the page was frozen (screen off)
   if(audio.ended&&!_isSwitchingTrack&&!_isSeeking){
     stopMediaSessionKeepalive();
-    if(!isRepeat)nextTrack();
-    else{audio.currentTime=0;audio.play().catch(()=>{});}
+    if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});}
+    else nextTrack();
     return;
   }
   if(!audio.duration)return;
-  // Don't overwrite bar/time while user is dragging (seekAudio handles it directly)
   if(!_isSeeking){
     const pct=(audio.currentTime/audio.duration)*100;
     ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=pct;});
-    const t=fmt(audio.currentTime);
-    ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
+    ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=fmt(audio.currentTime);});
   }
   if(audio.currentTime%5<0.3) updatePositionState();
 });
-audio.addEventListener('loadedmetadata',()=>{
-  const t=fmt(audio.duration);
-  ['dur-time','dur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-  updatePositionState();
-});
-audio.addEventListener('ended',()=>{
-  // Don't release lock here — nextTrack → playTrack will re-acquire.
-  // Only stop the keepalive; it restarts on the next audio.play().
-  stopMediaSessionKeepalive();
-  if(!isRepeat)nextTrack();
-});
+
 audio.addEventListener('error',()=>{
   if(!audio.src||audio.src===window.location.href)return;
   showToast('播放錯誤，切換下一首…');
   setTimeout(nextTrack,1500);
 });
 
-/* ── Visibility: re-assert media session when tab comes back ── */
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden)return;
-  // If track ended while page was frozen, advance now
-  if(audio.ended&&!_isSwitchingTrack){
-    if(!isRepeat)nextTrack();
-    else{audio.currentTime=0;audio.play().catch(()=>{});}
-    return;
-  }
-  if(!audio.paused&&currentIdx>=0&&allTracks[currentIdx])
-    updateMediaSession(allTracks[currentIdx]);
+/* ── Seek bar ── */
+function seekAudio(v){
+  if(!audio.duration)return;
+  audio.currentTime=(v/100)*audio.duration;
+  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=v;});
+  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=fmt(audio.currentTime);});
+}
+['seek-bar','seek-bar-m'].forEach(id=>{
+  const el=document.getElementById(id);if(!el)return;
+  el.addEventListener('pointerdown',  ()=>{_isSeeking=true;});
+  el.addEventListener('pointerup',    ()=>{_isSeeking=false;});
+  el.addEventListener('pointercancel',()=>{_isSeeking=false;});
+  el.addEventListener('change',       ()=>{_isSeeking=false;}); // safety net
 });
 
-
-/* ── Page Lifecycle (Chrome may freeze JS when screen is off)
-   'freeze' = JS suspended; 'resume' = JS unfrozen.
-   On resume, re-assert media session and restart keepalive.
-── */
-document.addEventListener('resume',()=>{
+/* ── Page lifecycle: re-assert session; catch missed 'ended' on resume ── */
+function onPageResume(){
   if(audio.ended&&!_isSwitchingTrack){
-    if(!isRepeat)nextTrack();
-    else{audio.currentTime=0;audio.play().catch(()=>{});}
+    if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});}
+    else nextTrack();
     return;
   }
-  if(currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
+  if(!audio.paused&&currentIdx>=0&&allTracks[currentIdx]){
     updateMediaSession(allTracks[currentIdx]);
     startMediaSessionKeepalive();
   }
-});
-window.addEventListener('pageshow',(e)=>{
-  if(!e.persisted)return;
-  if(audio.ended&&!_isSwitchingTrack){
-    if(!isRepeat)nextTrack();
-    else{audio.currentTime=0;audio.play().catch(()=>{});}
-    return;
-  }
-  if(currentIdx>=0&&allTracks[currentIdx]&&!audio.paused){
-    updateMediaSession(allTracks[currentIdx]);
-    startMediaSessionKeepalive();
-  }
-});
-
-/* ── Web Locks: hold a lock while playing to discourage Chrome from freezing the page ── */
-let _releaseLock=null;
-function acquirePlaybackLock(){
-  if(!('locks' in navigator)||_releaseLock)return;
-  navigator.locks.request('drive-music-playback',{mode:'shared'},()=>
-    new Promise(resolve=>{_releaseLock=resolve;})
-  ).catch(()=>{});
 }
-function releasePlaybackLock(){
-  if(_releaseLock){_releaseLock();_releaseLock=null;}
-}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)onPageResume();});
+document.addEventListener('resume',onPageResume);
+window.addEventListener('pageshow',(e)=>{if(e.persisted)onPageResume();});
 
+/* ══════════════════════════════════════════════════════════════════
+   PLAYBACK CONTROL
+   ══════════════════════════════════════════════════════════════════ */
 async function playTrack(idx){
   if(idx<0||idx>=allTracks.length)return;
 
@@ -1279,10 +1277,11 @@ async function playTrack(idx){
   const name=t.name.replace(/\.[^.]+$/,'');
   const ext=(t.name.split('.').pop()||'audio').toUpperCase();
 
-  // ── 1. Signal track switch ────────────────────────────────────
+  // ── A. Signal switch (guards pause/ended events) ──────────────
   _isSwitchingTrack=true;
 
-  // Assert new track metadata immediately (lockscreen shows new title right away)
+  // Assert new track metadata immediately so lockscreen shows the
+  // correct title right away, even before the blob is ready.
   if('mediaSession' in navigator){
     try{
       navigator.mediaSession.metadata=new MediaMetadata({
@@ -1295,12 +1294,7 @@ async function playTrack(idx){
     registerMediaSessionHandlers();
   }
 
-  // ── 2. Pause old audio; hand off keepalive to switch keepalive ─
-  stopMediaSessionKeepalive(); // stop normal 2s keepalive
-  startSwitchKeepalive();      // start aggressive 500ms keepalive for Vivo
-  audio.pause();               // pause event fires; _isSwitchingTrack=true → no-op
-
-  // ── 3. Update UI ──────────────────────────────────────────────
+  // ── B. Update UI ──────────────────────────────────────────────
   setupMarquee('now-title',name);
   if(isMobile()&&mobView!=='player') switchMobView('player');
   document.getElementById('now-ext').textContent=ext;
@@ -1310,10 +1304,9 @@ async function playTrack(idx){
   if(mt){mt.textContent=name;mt.classList.remove('idle');}
   const mf=document.getElementById('mini-folder');
   if(mf)mf.textContent=currentFolderName;
-  const label=document.getElementById('vinyl-label');
-  label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`:
-    '<span class="vinyl-label-icon">♪</span>';
-
+  document.getElementById('vinyl-label').innerHTML=t.thumbnailLink
+    ?`<img src="${t.thumbnailLink}" alt="">`
+    :'<span class="vinyl-label-icon">♪</span>';
   renderList(visibleTracks);
   setTimeout(()=>{
     document.querySelectorAll(`#ti-${idx}`).forEach(el=>
@@ -1321,39 +1314,45 @@ async function playTrack(idx){
     );
   },50);
 
-  // ── 4. Fetch blob ─────────────────────────────────────────────
-  const bail=(reason)=>{_isSwitchingTrack=false;stopSwitchKeepalive();return reason;};
+  // ── C. Fetch blob (old audio keeps playing — no silence) ──────
+  // bail() cleans up flag + switch keepalive on any early return
+  const bail=()=>{_isSwitchingTrack=false;stopSwitchKeepalive();};
 
   try{
     showToast(`載入中：${name}`);
     await refreshTokenIfNeeded();
-    if(reqId!==playReqId)return bail('stale after token');
+    if(reqId!==playReqId){bail();return;}
 
     const resp=await fetchAudioWithRetry(t.id);
-    if(reqId!==playReqId)return bail('stale after fetch');
+    if(reqId!==playReqId){bail();return;}
 
     const blob=await resp.blob();
-    if(reqId!==playReqId)return bail('stale after blob');
+    if(reqId!==playReqId){bail();return;}
 
     const newUrl=URL.createObjectURL(blob);
 
-    // ── 5. Atomic switch ──────────────────────────────────────────
-    stopSwitchKeepalive();                               // normal keepalive takes over after play
+    // ── D. Atomic switch ─────────────────────────────────────────
+    // Old audio stops here; switch keepalive covers the ~100–500 ms
+    // gap between pause and play so Vivo doesn't reclaim focus.
+    stopMediaSessionKeepalive();
+    startSwitchKeepalive();
+    audio.pause();   // _isSwitchingTrack=true → pause event is a no-op
     if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=newUrl;
     audio.src=currentBlobUrl;
-    await audio.play();                                  // play event → startMediaSessionKeepalive()
+    await audio.play(); // play event fires → startMediaSessionKeepalive + acquirePlaybackLock
+    stopSwitchKeepalive();
     _isSwitchingTrack=false;
-    acquirePlaybackLock();
-    updateMediaSession(t);
+    updateMediaSession(t); // final assert now that duration is known
   }catch(e){
-    bail('error');
-    if(reqId!==playReqId)return;
+    bail();
+    if(reqId!==playReqId)return; // stale error — ignore
     console.error('playTrack error:',e);
     showToast('載入失敗：'+e.message);
     setTimeout(nextTrack,2000);
   }
 }
+
 function togglePlay(){
   if(currentIdx===-1&&allTracks.length){playTrack(0);return;}
   if(audio.paused)audio.play().catch(()=>{});else audio.pause();
@@ -1368,25 +1367,6 @@ function prevTrack(){
   if(audio.currentTime>3){audio.currentTime=0;return;}
   playTrack((currentIdx-1+allTracks.length)%allTracks.length);
 }
-function seekAudio(v){
-  if(!audio.duration)return;
-  audio.currentTime=(v/100)*audio.duration;
-  // Immediately sync both bars and time display (don't wait for timeupdate)
-  ['seek-bar','seek-bar-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=v;});
-  const t=fmt(audio.currentTime);
-  ['cur-time','cur-time-m'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=t;});
-}
-
-/* ── Seek bar drag: pause timeupdate bar-sync while user is dragging ── */
-['seek-bar','seek-bar-m'].forEach(id=>{
-  const el=document.getElementById(id);
-  if(!el)return;
-  el.addEventListener('pointerdown',()=>{_isSeeking=true;});
-  el.addEventListener('pointerup',()=>{_isSeeking=false;});
-  el.addEventListener('pointercancel',()=>{_isSeeking=false;});
-  // Safety net: if pointerup is somehow missed, change always fires last
-  el.addEventListener('change',()=>{_isSeeking=false;});
-});
 function setVolume(v){audio.volume=v/100;}
 function toggleShuffle(){
   isShuffle=!isShuffle;
