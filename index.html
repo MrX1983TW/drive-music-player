@@ -81,6 +81,15 @@ body{
 .track-item{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:7px;cursor:pointer;transition:background .15s;border:1px solid transparent;}
 .track-item:hover{background:var(--bg);}
 .track-item.active{background:var(--gold-glow);border-color:rgba(139,107,44,.18);}
+/* Drag handle */
+.drag-handle{flex-shrink:0;width:16px;text-align:center;font-size:1rem;color:var(--muted);cursor:grab;opacity:0;transition:opacity .15s;user-select:none;touch-action:none;}
+.track-item:hover .drag-handle{opacity:.5;}
+.drag-handle:hover{opacity:1!important;}
+/* Drag states */
+.track-item.sort-src{opacity:.25;pointer-events:none;}
+.track-item.sort-over-top{border-top:2px solid var(--gold)!important;}
+.track-item.sort-over-bottom{border-bottom:2px solid var(--gold)!important;}
+.sort-ghost{pointer-events:none;z-index:9999;box-shadow:0 6px 24px rgba(0,0,0,.45)!important;border-radius:7px!important;}
 .t-num{font-family:'Space Mono',monospace;font-size:.76rem;color:var(--muted);min-width:20px;text-align:right;}
 .track-item.active .t-num{color:var(--gold);}
 .t-info{flex:1;min-width:0;}
@@ -294,6 +303,7 @@ input[type="range"]#vol-bar:hover::-webkit-slider-thumb{background:var(--cream);
   /* Mobile track list */
   #mob-track-list{flex:1;overflow-y:auto;padding:4px;}
   #mob-track-list .track-item{padding:11px 14px;border-radius:10px;}
+  #mob-track-list .drag-handle{opacity:.4;} /* always visible on mobile (no hover) */
   #mob-track-list .t-name{font-size:.9rem;}
   #mob-track-list .t-ext{font-size:.7rem;}
 
@@ -1005,7 +1015,7 @@ async function loadFiles(){
       files=files.concat(data.files||[]);
       pageToken=data.nextPageToken;
     }while(pageToken);
-    allTracks=files;visibleTracks=files;
+    allTracks=files;applyTrackOrder();visibleTracks=allTracks;
     if(!files.length){
       const msg='<div class="list-state">🎵<br><br>找不到音樂檔案<br><small>支援：MP3、FLAC、WAV、OGG、M4A、AAC</small></div>';
       ['track-list','mob-track-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=msg;});
@@ -1038,6 +1048,7 @@ function renderList(tracks){
       ? `<div class="t-name t-mq"><span class="t-mq-inner">${esc(name)}&nbsp;&nbsp;·&nbsp;&nbsp;${esc(name)}</span></div>`
       : `<div class="t-name">${esc(name)}</div>`;
     return `<div class="track-item${active?' active':''}" id="ti-${gi}" onclick="playTrack(${gi})">
+      <div class="drag-handle" title="拖曳排序" onclick="event.stopPropagation()">⠿</div>
       <div class="t-num">${active?'<div class="eq-anim"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>':(gi+1)}</div>
       <div class="t-info">
         ${nameHtml}
@@ -1050,6 +1061,7 @@ function renderList(tracks){
   const html=tracks.length?makeHtml(tracks):'<div class="list-state">沒有符合的結果</div>';
   if(el)el.innerHTML=html;
   if(mel)mel.innerHTML=html;
+  initDragSort();
 }
 function filterTracks(q,src){
   // sync both search inputs
@@ -1387,7 +1399,132 @@ function setPlaying(p){
   if(md){p?md.classList.add('spinning'):md.classList.remove('spinning');}
 }
 
-/* ── Swipe gestures on player (mobile) ── *//* ── Swipe gestures on player (mobile) ── */
+/* ══════════════════════════════════════════════════════════════════
+   TRACK DRAG-AND-DROP SORT
+   ══════════════════════════════════════════════════════════════════ */
+let _drag=null; // active drag state
+
+function initDragSort(){
+  ['track-list','mob-track-list'].forEach(id=>{
+    const container=document.getElementById(id);
+    if(!container||container._sortInited)return;
+    container._sortInited=true;
+    container.addEventListener('pointerdown',onDragDown,{passive:false});
+  });
+}
+
+function onDragDown(e){
+  if(!e.target.closest('.drag-handle'))return;
+  const item=e.target.closest('.track-item');
+  if(!item)return;
+  e.preventDefault();
+
+  const container=this;
+  const rect=item.getBoundingClientRect();
+  const offsetY=e.clientY-rect.top;
+
+  // Ghost: clone positioned over the original
+  const ghost=item.cloneNode(true);
+  ghost.className=item.className+' sort-ghost';
+  ghost.style.cssText+=`;position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;margin:0;background:var(--surface);`;
+  document.body.appendChild(ghost);
+  item.classList.add('sort-src');
+
+  _drag={item,ghost,container,offsetY,srcId:item.id};
+
+  document.addEventListener('pointermove',onDragMove,{passive:false});
+  document.addEventListener('pointerup',onDragUp,{once:true});
+}
+
+function onDragMove(e){
+  if(!_drag)return;
+  e.preventDefault();
+  const {ghost,container,offsetY}=_drag;
+  ghost.style.top=(e.clientY-offsetY)+'px';
+
+  // Clear previous indicator
+  container.querySelectorAll('.sort-over-top,.sort-over-bottom').forEach(el=>{
+    el.classList.remove('sort-over-top','sort-over-bottom');
+  });
+
+  // Find the item under the pointer (skip the dragged one)
+  const items=[...container.querySelectorAll('.track-item:not(.sort-src)')];
+  for(const el of items){
+    const r=el.getBoundingClientRect();
+    if(e.clientY<r.top||e.clientY>r.bottom)continue;
+    const mid=r.top+r.height/2;
+    el.classList.add(e.clientY<mid?'sort-over-top':'sort-over-bottom');
+    break;
+  }
+}
+
+function onDragUp(e){
+  if(!_drag)return;
+  const {item,ghost,container,srcId}=_drag;
+  _drag=null;
+  document.removeEventListener('pointermove',onDragMove);
+
+  ghost.remove();
+  item.classList.remove('sort-src');
+
+  const overTop=container.querySelector('.sort-over-top');
+  const overBot=container.querySelector('.sort-over-bottom');
+  const overEl=overTop||overBot;
+  const insertBefore=!!overTop; // true = insert before, false = insert after
+  container.querySelectorAll('.sort-over-top,.sort-over-bottom').forEach(el=>{
+    el.classList.remove('sort-over-top','sort-over-bottom');
+  });
+
+  if(!overEl)return; // dropped on same spot or outside list
+  const srcIdx=parseInt(srcId.replace('ti-',''));
+  const destIdx=parseInt(overEl.id.replace('ti-',''));
+  if(srcIdx===destIdx)return;
+
+  // Calculate actual insertion index in allTracks
+  const finalIdx=insertBefore?destIdx:(destIdx+1>srcIdx?destIdx:destIdx);
+  reorderTracks(srcIdx,insertBefore?destIdx:destIdx,insertBefore);
+}
+
+function reorderTracks(srcIdx,destIdx,insertBefore){
+  // Correct: if inserting after destIdx and destIdx is below src, actual position is destIdx
+  // after removing src (srcIdx < destIdx), the dest shifts down by 1
+  let insertAt=insertBefore?destIdx:destIdx+1;
+  if(srcIdx<insertAt) insertAt--; // compensate for the removal shifting indices
+
+  // Update currentIdx
+  if(currentIdx===srcIdx) currentIdx=insertAt;
+  else if(srcIdx<insertAt&&currentIdx>srcIdx&&currentIdx<=insertAt) currentIdx--;
+  else if(srcIdx>insertAt&&currentIdx>=insertAt&&currentIdx<srcIdx) currentIdx++;
+
+  const [moved]=allTracks.splice(srcIdx,1);
+  allTracks.splice(insertAt,0,moved);
+
+  // Re-render: preserve active search filter
+  const q=(document.getElementById('search-input')||{}).value||'';
+  if(q) filterTracks(q,'desktop');
+  else renderList(allTracks);
+
+  saveTrackOrder();
+}
+
+/* ── Persist track order per folder ── */
+function orderKey(){return'drivemusic_order_'+(currentFolderId||'root');}
+function saveTrackOrder(){
+  try{localStorage.setItem(orderKey(),JSON.stringify(allTracks.map(t=>t.id)));}catch(_){}
+}
+function applyTrackOrder(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(orderKey())||'null');
+    if(!saved||!saved.length)return;
+    const map=new Map(allTracks.map(t=>[t.id,t]));
+    const ordered=saved.map(id=>map.get(id)).filter(Boolean);
+    // Append any newly added tracks not in the saved order
+    const seen=new Set(saved);
+    allTracks.forEach(t=>{if(!seen.has(t.id))ordered.push(t);});
+    allTracks=ordered;
+  }catch(_){}
+}
+/* ── Swipe gestures on player (mobile) ── */
 let _sx=null,_sy=null;
 document.getElementById('player-main').addEventListener('touchstart',e=>{
   _sx=e.touches[0].clientX;_sy=e.touches[0].clientY;
