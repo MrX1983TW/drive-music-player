@@ -739,36 +739,41 @@ const DEFAULT_ARTWORK = 'data:image/svg+xml,' + encodeURIComponent(
   '</svg>'
 );
 
-/* ── Vivo / Funtouch OS media focus keepalive ──────────────────
-   Origin OS 6 periodically reclaims media focus from web pages,
-   and always reclaims it during the brief pause between tracks.
-   We fight back by:
-   1. Keeping the timer alive during track switches (_isSwitchingTrack)
-   2. Force-asserting 'playing' state while fetching the next blob
-   3. Re-asserting full metadata + handlers every 2s while playing
+/* ── Two-tier keepalive for Vivo / Funtouch OS ─────────────────
+   Normal keepalive (2 s): re-asserts metadata while audio plays.
+   Switch keepalive (500 ms): fires during the fetch gap between
+   tracks, forcing playbackState='playing' so Vivo never sees a
+   pause long enough to reclaim media focus.
+   The two are independent; switch keepalive is stopped the moment
+   the new audio.play() call succeeds.
 ─────────────────────────────────────────────────────────────── */
-let _keepaliveTimer = null;
+let _keepaliveTimer=null;
+let _switchKeepaliveTimer=null;
 
 function startMediaSessionKeepalive(){
   stopMediaSessionKeepalive();
-  _keepaliveTimer = setInterval(()=>{
-    if(currentIdx < 0) return;
-    if(audio.paused && !_isSwitchingTrack) return; // genuinely paused by user — skip
-    const track = allTracks[currentIdx];
-    if(!track || !('mediaSession' in navigator)) return;
-    if(_isSwitchingTrack){
-      // During fetch gap: force the session to look alive so Vivo doesn't reclaim it
-      navigator.mediaSession.playbackState='playing';
-      registerMediaSessionHandlers();
-    }else{
-      updateMediaSession(track);
-      updatePositionState();
-    }
-  }, 2000);
+  _keepaliveTimer=setInterval(()=>{
+    if(currentIdx<0||audio.paused)return;
+    const track=allTracks[currentIdx];
+    if(!track||!('mediaSession' in navigator))return;
+    updateMediaSession(track);
+    updatePositionState();
+  },2000);
+}
+function stopMediaSessionKeepalive(){
+  if(_keepaliveTimer){clearInterval(_keepaliveTimer);_keepaliveTimer=null;}
 }
 
-function stopMediaSessionKeepalive(){
-  if(_keepaliveTimer){ clearInterval(_keepaliveTimer); _keepaliveTimer=null; }
+function startSwitchKeepalive(){
+  stopSwitchKeepalive();
+  _switchKeepaliveTimer=setInterval(()=>{
+    if(!('mediaSession' in navigator))return;
+    navigator.mediaSession.playbackState='playing';
+    registerMediaSessionHandlers();
+  },500);
+}
+function stopSwitchKeepalive(){
+  if(_switchKeepaliveTimer){clearInterval(_switchKeepaliveTimer);_switchKeepaliveTimer=null;}
 }
 
 /* ── Register Media Session handlers early (before any playback)
@@ -859,6 +864,7 @@ function signOut(){
   accessToken=null;allTracks=[];currentIdx=-1;
   _isSwitchingTrack=false;
   stopMediaSessionKeepalive();
+  stopSwitchKeepalive();
   releasePlaybackLock();
   audio.pause();audio.src='';setPlaying(false);
   document.getElementById('app').style.display='none';
@@ -1168,13 +1174,11 @@ audio.addEventListener('play',()=>{
 });
 audio.addEventListener('pause',()=>{
   setPlaying(false);
-  if(!_isSwitchingTrack){
-    // Genuine user pause — update session state, stop keepalive, release lock
-    if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
-    stopMediaSessionKeepalive();
-    releasePlaybackLock();
-  }
-  // If _isSwitchingTrack: keepalive keeps running, session stays 'playing', lock stays held
+  if(_isSwitchingTrack)return; // playTrack manages keepalives; don't touch them here
+  // Genuine user pause
+  if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
+  stopMediaSessionKeepalive();
+  releasePlaybackLock();
 });
 audio.addEventListener('timeupdate',()=>{
   // Backup for when 'ended' event is missed while page is frozen (screen off)
@@ -1269,16 +1273,16 @@ function releasePlaybackLock(){
 async function playTrack(idx){
   if(idx<0||idx>=allTracks.length)return;
 
-  const reqId=++playReqId; // unique ID for this request
-
+  const reqId=++playReqId;
   currentIdx=idx;
   const t=allTracks[idx];
   const name=t.name.replace(/\.[^.]+$/,'');
   const ext=(t.name.split('.').pop()||'audio').toUpperCase();
 
-  // ── Step 1: Update lockscreen metadata IMMEDIATELY ────────────
-  // Old track keeps playing; Vivo sees new title in notification
-  // right away and never gets a chance to show another app.
+  // ── 1. Signal track switch ────────────────────────────────────
+  _isSwitchingTrack=true;
+
+  // Assert new track metadata immediately (lockscreen shows new title right away)
   if('mediaSession' in navigator){
     try{
       navigator.mediaSession.metadata=new MediaMetadata({
@@ -1286,13 +1290,17 @@ async function playTrack(idx){
         album:currentFolderName||'Google Drive',
         artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
       });
-      // Keep playbackState as 'playing' — old audio still running
       navigator.mediaSession.playbackState='playing';
     }catch(_){}
     registerMediaSessionHandlers();
   }
 
-  // ── Step 2: Update UI ─────────────────────────────────────────
+  // ── 2. Pause old audio; hand off keepalive to switch keepalive ─
+  stopMediaSessionKeepalive(); // stop normal 2s keepalive
+  startSwitchKeepalive();      // start aggressive 500ms keepalive for Vivo
+  audio.pause();               // pause event fires; _isSwitchingTrack=true → no-op
+
+  // ── 3. Update UI ──────────────────────────────────────────────
   setupMarquee('now-title',name);
   if(isMobile()&&mobView!=='player') switchMobView('player');
   document.getElementById('now-ext').textContent=ext;
@@ -1303,46 +1311,44 @@ async function playTrack(idx){
   const mf=document.getElementById('mini-folder');
   if(mf)mf.textContent=currentFolderName;
   const label=document.getElementById('vinyl-label');
-  label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`: '<span class="vinyl-label-icon">♪</span>';
-
-  // NOTE: audio.pause() is intentionally NOT called here.
-  // Old audio keeps playing during the fetch so the OS sees
-  // continuous playback and never reclaims media focus.
+  label.innerHTML=t.thumbnailLink?`<img src="${t.thumbnailLink}" alt="">`:
+    '<span class="vinyl-label-icon">♪</span>';
 
   renderList(visibleTracks);
   setTimeout(()=>{
-    document.querySelectorAll(`#ti-${idx}`).forEach(el=>el.scrollIntoView({behavior:'smooth',block:'nearest'}));
+    document.querySelectorAll(`#ti-${idx}`).forEach(el=>
+      el.scrollIntoView({behavior:'smooth',block:'nearest'})
+    );
   },50);
 
-  // ── Step 3: Fetch blob while old audio plays ──────────────────
+  // ── 4. Fetch blob ─────────────────────────────────────────────
+  const bail=(reason)=>{_isSwitchingTrack=false;stopSwitchKeepalive();return reason;};
+
   try{
     showToast(`載入中：${name}`);
     await refreshTokenIfNeeded();
-    if(reqId!==playReqId)return; // stale: user picked another song
+    if(reqId!==playReqId)return bail('stale after token');
 
     const resp=await fetchAudioWithRetry(t.id);
-    if(reqId!==playReqId)return; // stale
+    if(reqId!==playReqId)return bail('stale after fetch');
 
     const blob=await resp.blob();
-    if(reqId!==playReqId)return; // stale
+    if(reqId!==playReqId)return bail('stale after blob');
 
     const newUrl=URL.createObjectURL(blob);
 
-    // ── Step 4: Atomic switch — pause is now milliseconds ─────
-    // _isSwitchingTrack prevents the pause event from touching
-    // the media session or killing the keepalive.
-    _isSwitchingTrack=true;
-    audio.pause();
+    // ── 5. Atomic switch ──────────────────────────────────────────
+    stopSwitchKeepalive();                               // normal keepalive takes over after play
     if(currentBlobUrl){URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=null;}
     currentBlobUrl=newUrl;
     audio.src=currentBlobUrl;
-    await audio.play();
+    await audio.play();                                  // play event → startMediaSessionKeepalive()
     _isSwitchingTrack=false;
-    acquirePlaybackLock();       // hold Web Lock to discourage page freeze
-    updateMediaSession(t);       // final assert with real duration now available
+    acquirePlaybackLock();
+    updateMediaSession(t);
   }catch(e){
-    _isSwitchingTrack=false;
-    if(reqId!==playReqId)return; // stale error, ignore
+    bail('error');
+    if(reqId!==playReqId)return;
     console.error('playTrack error:',e);
     showToast('載入失敗：'+e.message);
     setTimeout(nextTrack,2000);
