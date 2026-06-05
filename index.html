@@ -768,6 +768,56 @@ let _isSwitchingTrack=false; // true from playTrack start until audio.play() res
 let _isSeeking=false;        // true while user is dragging a seek bar
 const isMobile=()=>window.innerWidth<=640;
 
+/* ── Background end-detection timers ── */
+let _endCheckTimer=null;       // 1s polling interval
+let _scheduledEndTimeout=null; // setTimeout at predicted end time
+let _endAlreadyHandled=false;  // prevent double-fire within same track
+
+function handleBackgroundEnd(){
+  if(_endAlreadyHandled||_isSwitchingTrack)return;
+  // Double-check that the track truly ended or is extremely close to ending
+  if(!audio.duration||!isFinite(audio.duration))return;
+  if(audio.currentTime<audio.duration-1.5&&!audio.ended)return;
+  _endAlreadyHandled=true;
+  console.log('[BG-END] detected track end, currentTime='+audio.currentTime+' duration='+audio.duration);
+  stopEndDetection();
+  stopMediaSessionKeepalive();
+  if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});_endAlreadyHandled=false;return;}
+  nextTrack();
+}
+
+function startEndDetection(){
+  stopEndDetection();
+  _endAlreadyHandled=false;
+  // Tier 1: 1-second polling — checks currentTime vs duration
+  _endCheckTimer=setInterval(()=>{
+    if(_isSwitchingTrack||!audio.duration||!isFinite(audio.duration))return;
+    if(audio.paused&&!audio.ended)return; // user paused
+    if(audio.ended||audio.currentTime>=audio.duration-0.5){
+      handleBackgroundEnd();
+    }
+  },1000);
+  // Tier 2: scheduled timeout — fires at predicted end time
+  scheduleEndTimeout();
+}
+
+function scheduleEndTimeout(){
+  if(_scheduledEndTimeout){clearTimeout(_scheduledEndTimeout);_scheduledEndTimeout=null;}
+  if(!audio.duration||!isFinite(audio.duration)||audio.paused)return;
+  const remaining=audio.duration-audio.currentTime;
+  if(remaining<=0)return;
+  // Add 1.5s buffer to account for timer imprecision
+  _scheduledEndTimeout=setTimeout(()=>{
+    console.log('[BG-TIMEOUT] scheduled end timer fired');
+    handleBackgroundEnd();
+  },(remaining+1.5)*1000);
+}
+
+function stopEndDetection(){
+  if(_endCheckTimer){clearInterval(_endCheckTimer);_endCheckTimer=null;}
+  if(_scheduledEndTimeout){clearTimeout(_scheduledEndTimeout);_scheduledEndTimeout=null;}
+}
+
 const audio=document.getElementById('audio');
 
 /* ── Artwork (data URI — works without auth in Android notifications) ── */
@@ -931,6 +981,7 @@ function signOut(){
   _isSwitchingTrack=false;
   stopMediaSessionKeepalive();
   stopSwitchKeepalive();
+  stopEndDetection();
   releasePlaybackLock();
   audio.pause();audio.src='';setPlaying(false);
   document.getElementById('app').style.display='none';
@@ -1199,6 +1250,8 @@ audio.addEventListener('play',()=>{
   if(currentIdx>=0&&allTracks[currentIdx]) updateMediaSession(allTracks[currentIdx]);
   startMediaSessionKeepalive();
   acquirePlaybackLock();
+  // (Re)start end detection & reschedule timeout whenever playback resumes
+  startEndDetection();
 });
 
 audio.addEventListener('pause',()=>{
@@ -1207,12 +1260,18 @@ audio.addEventListener('pause',()=>{
   if('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
   stopMediaSessionKeepalive();
   releasePlaybackLock();
+  // Clear scheduled timeout on pause (polling stays to catch edge cases)
+  if(_scheduledEndTimeout){clearTimeout(_scheduledEndTimeout);_scheduledEndTimeout=null;}
 });
 
 audio.addEventListener('ended',()=>{
+  console.log('[ENDED] native ended event fired');
   stopMediaSessionKeepalive();
+  stopEndDetection();
   if(_isSwitchingTrack)return; // fetch-first: old track ended mid-fetch; playTrack handles next
-  if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});return;}
+  if(_endAlreadyHandled)return; // background detection already handled this
+  _endAlreadyHandled=true;
+  if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});_endAlreadyHandled=false;return;}
   nextTrack();
 });
 
@@ -1221,14 +1280,14 @@ audio.addEventListener('loadedmetadata',()=>{
     const el=document.getElementById(id);if(el)el.textContent=fmt(audio.duration);
   });
   updatePositionState();
+  // Now that duration is known, (re)schedule end timeout precisely
+  scheduleEndTimeout();
 });
 
 audio.addEventListener('timeupdate',()=>{
   // Backup: catch 'ended' events missed while the page was frozen (screen off)
   if(audio.ended&&!_isSwitchingTrack&&!_isSeeking){
-    stopMediaSessionKeepalive();
-    if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});}
-    else nextTrack();
+    handleBackgroundEnd();
     return;
   }
   if(!audio.duration)return;
@@ -1263,19 +1322,26 @@ function seekAudio(v){
 
 /* ── Page lifecycle: re-assert session; catch missed 'ended' on resume ── */
 function onPageResume(){
-  if(audio.ended&&!_isSwitchingTrack){
-    if(isRepeat){audio.currentTime=0;audio.play().catch(()=>{});}
-    else nextTrack();
-    return;
+  console.log('[RESUME] page resumed, ended='+audio.ended+' time='+audio.currentTime+' dur='+audio.duration);
+  if(!_isSwitchingTrack){
+    // Check if track ended or is very close to ending (within 1.5s)
+    if(audio.ended||(audio.duration&&isFinite(audio.duration)&&audio.currentTime>=audio.duration-1.5)){
+      handleBackgroundEnd();
+      return;
+    }
   }
   if(!audio.paused&&currentIdx>=0&&allTracks[currentIdx]){
     updateMediaSession(allTracks[currentIdx]);
     startMediaSessionKeepalive();
+    // Reschedule end timeout with fresh remaining time
+    scheduleEndTimeout();
   }
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)onPageResume();});
 document.addEventListener('resume',onPageResume);
-window.addEventListener('pageshow',(e)=>{if(e.persisted)onPageResume();});
+window.addEventListener('pageshow',(e)=>{if(e.persisted)onPageResume();})
+// Also handle 'freeze' → 'resume' lifecycle (Chrome on Android)
+try{document.addEventListener('freeze',()=>{console.log('[FREEZE] page frozen');});}catch(_){}
 
 /* ══════════════════════════════════════════════════════════════════
    PLAYBACK CONTROL
@@ -1291,6 +1357,8 @@ async function playTrack(idx){
 
   // ── A. Signal switch (guards pause/ended events) ──────────────
   _isSwitchingTrack=true;
+  stopEndDetection();
+  _endAlreadyHandled=false;
 
   // Assert new track metadata immediately so lockscreen shows the
   // correct title right away, even before the blob is ready.
