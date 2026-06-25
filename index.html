@@ -768,6 +768,52 @@ let _isSwitchingTrack=false; // true from playTrack start until audio.play() res
 let _isSeeking=false;        // true while user is dragging a seek bar
 const isMobile=()=>window.innerWidth<=640;
 
+/* ── Next-track prefetch ──────────────────────────────────────────
+   The single biggest reason "next song" fails in the background:
+   tapping next (or a track ending) triggers a fresh blob download,
+   and while the screen is locked Android freezes the JS thread before
+   that fetch + audio.play() can finish, so focus is lost.
+   We pre-download the *next* blob as soon as the current one is
+   playing. Then advancing is just src-swap + play() — no network —
+   which completes inside the brief window Chrome wakes the page for. */
+let _prefetch={idx:-1,url:null,promise:null};
+let _nextShuffleIdx=-1;
+function clearPrefetch(){
+  if(_prefetch.url){try{URL.revokeObjectURL(_prefetch.url);}catch(_){}}
+  _prefetch={idx:-1,url:null,promise:null};
+}
+function pickShuffleIdx(){
+  if(allTracks.length<=1)return 0;
+  let r;do{r=Math.floor(Math.random()*allTracks.length);}while(r===currentIdx&&allTracks.length>1);
+  return r;
+}
+function nextIndex(){
+  if(!allTracks.length)return -1;
+  if(isShuffle){
+    if(_nextShuffleIdx<0||_nextShuffleIdx>=allTracks.length)_nextShuffleIdx=pickShuffleIdx();
+    return _nextShuffleIdx;
+  }
+  return (currentIdx+1)%allTracks.length;
+}
+function prefetchNext(){
+  const ni=nextIndex();
+  if(ni<0||ni===currentIdx){clearPrefetch();return;}
+  if(_prefetch.idx===ni&&(_prefetch.url||_prefetch.promise))return; // already warming/warm
+  clearPrefetch();
+  const t=allTracks[ni];
+  if(!t)return;
+  _prefetch.idx=ni;
+  _prefetch.promise=(async()=>{
+    try{
+      await refreshTokenIfNeeded();
+      const resp=await fetchAudioWithRetry(t.id);
+      const blob=await resp.blob();
+      if(_prefetch.idx!==ni)return; // target moved on; drop it
+      _prefetch.url=URL.createObjectURL(blob);
+    }catch(_){/* best-effort; slow path will fetch on demand */}
+  })();
+}
+
 /* ── Background end-detection timers ── */
 let _endCheckTimer=null;       // 1s polling interval
 let _scheduledEndTimeout=null; // setTimeout at predicted end time
@@ -820,13 +866,44 @@ function stopEndDetection(){
 
 const audio=document.getElementById('audio');
 
-/* ── Artwork (data URI — works without auth in Android notifications) ── */
+/* ── Artwork ──────────────────────────────────────────────────────
+   Android / Chrome MediaSession CANNOT decode SVG artwork for the
+   lock-screen & notification media controls — with an SVG the rich
+   controls often fail to appear at all (exactly the Vivo symptom).
+   So we rasterise a proper PNG via <canvas> in several sizes; Chrome
+   picks 256² (low-end) or 512² for the lock screen.
+   ─────────────────────────────────────────────────────────────────*/
 const DEFAULT_ARTWORK='data:image/svg+xml,'+encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">'+
   '<rect width="96" height="96" rx="12" fill="#c9a44a"/>'+
   '<text x="48" y="66" font-size="52" text-anchor="middle" fill="white">♪</text>'+
   '</svg>'
 );
+function makeArtworkPNG(size){
+  const c=document.createElement('canvas');c.width=c.height=size;
+  const x=c.getContext('2d');
+  const r=size*0.12;
+  x.fillStyle='#c9a44a';
+  x.beginPath();
+  x.moveTo(r,0);
+  x.arcTo(size,0,size,size,r);
+  x.arcTo(size,size,0,size,r);
+  x.arcTo(0,size,0,0,r);
+  x.arcTo(0,0,size,0,r);
+  x.closePath();x.fill();
+  x.fillStyle='#ffffff';
+  x.font=Math.round(size*0.52)+'px sans-serif';
+  x.textAlign='center';x.textBaseline='middle';
+  x.fillText('♪',size/2,size*0.55);
+  return c.toDataURL('image/png');
+}
+/* Built once at load; falls back to the SVG only if canvas is unavailable */
+let ARTWORK=[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}];
+function buildArtwork(){
+  try{
+    ARTWORK=[96,192,256,512].map(s=>({src:makeArtworkPNG(s),sizes:s+'x'+s,type:'image/png'}));
+  }catch(_){/* keep SVG fallback */}
+}
 
 /* ── Keepalive ── */
 let _keepaliveTimer=null;
@@ -883,7 +960,7 @@ function updateMediaSession(track){
       title:(track.name||'').replace(/\.[^.]+$/,''),
       artist:'Drive Music',
       album:currentFolderName||'Google Drive',
-      artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
+      artwork:ARTWORK
     });
   }catch(e){console.warn('MediaMetadata failed:',e);}
   navigator.mediaSession.playbackState=audio.paused?'paused':'playing';
@@ -983,6 +1060,7 @@ function signOut(){
   stopSwitchKeepalive();
   stopEndDetection();
   releasePlaybackLock();
+  clearPrefetch();_nextShuffleIdx=-1;
   audio.pause();audio.src='';setPlaying(false);
   document.getElementById('app').style.display='none';
   document.getElementById('login-screen').style.display='flex';
@@ -1067,6 +1145,7 @@ async function loadFiles(){
       pageToken=data.nextPageToken;
     }while(pageToken);
     allTracks=files;applyTrackOrder();visibleTracks=allTracks;
+    clearPrefetch();_nextShuffleIdx=-1; // indices changed → drop stale prefetch
     if(!files.length){
       const msg='<div class="list-state">🎵<br><br>找不到音樂檔案<br><small>支援：MP3、FLAC、WAV、OGG、M4A、AAC</small></div>';
       ['track-list','mob-track-list'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=msg;});
@@ -1367,7 +1446,7 @@ async function playTrack(idx){
       navigator.mediaSession.metadata=new MediaMetadata({
         title:name,artist:'Drive Music',
         album:currentFolderName||'Google Drive',
-        artwork:[{src:DEFAULT_ARTWORK,sizes:'96x96',type:'image/svg+xml'}]
+        artwork:ARTWORK
       });
       navigator.mediaSession.playbackState='playing';
     }catch(_){}
@@ -1399,17 +1478,34 @@ async function playTrack(idx){
   const bail=()=>{_isSwitchingTrack=false;stopSwitchKeepalive();};
 
   try{
-    showToast(`載入中：${name}`);
-    await refreshTokenIfNeeded();
-    if(reqId!==playReqId){bail();return;}
+    let newUrl=null;
 
-    const resp=await fetchAudioWithRetry(t.id);
-    if(reqId!==playReqId){bail();return;}
+    // ── C1. Fast path: reuse the prefetched blob (no network) ─────
+    if(_prefetch.idx===idx){
+      if(!_prefetch.url&&_prefetch.promise){
+        try{await _prefetch.promise;}catch(_){}
+      }
+      if(reqId!==playReqId){bail();return;}
+      if(_prefetch.idx===idx&&_prefetch.url){
+        newUrl=_prefetch.url;
+        _prefetch={idx:-1,url:null,promise:null}; // hand ownership to currentBlobUrl
+      }
+    }
 
-    const blob=await resp.blob();
-    if(reqId!==playReqId){bail();return;}
+    // ── C2. Slow path: fetch this track now ───────────────────────
+    if(!newUrl){
+      showToast(`載入中：${name}`);
+      await refreshTokenIfNeeded();
+      if(reqId!==playReqId){bail();return;}
 
-    const newUrl=URL.createObjectURL(blob);
+      const resp=await fetchAudioWithRetry(t.id);
+      if(reqId!==playReqId){bail();return;}
+
+      const blob=await resp.blob();
+      if(reqId!==playReqId){bail();return;}
+
+      newUrl=URL.createObjectURL(blob);
+    }
 
     // ── D. Atomic switch ─────────────────────────────────────────
     // Old audio stops here; switch keepalive covers the ~100–500 ms
@@ -1424,6 +1520,7 @@ async function playTrack(idx){
     stopSwitchKeepalive();
     _isSwitchingTrack=false;
     updateMediaSession(t); // final assert now that duration is known
+    prefetchNext();        // warm the next track for instant background advance
   }catch(e){
     bail();
     if(reqId!==playReqId)return; // stale error — ignore
@@ -1439,8 +1536,9 @@ function togglePlay(){
 }
 function nextTrack(){
   if(!allTracks.length)return;
-  if(isShuffle){playTrack(Math.floor(Math.random()*allTracks.length));return;}
-  playTrack((currentIdx+1)%allTracks.length);
+  const ni=nextIndex();        // same index prefetchNext warmed up
+  _nextShuffleIdx=-1;          // consumed; next prefetch picks a fresh one
+  playTrack(ni);
 }
 function prevTrack(){
   if(!allTracks.length)return;
@@ -1451,6 +1549,8 @@ function setVolume(v){audio.volume=v/100;}
 function toggleShuffle(){
   isShuffle=!isShuffle;
   document.getElementById('shuffle-btn').classList.toggle('on',isShuffle);
+  _nextShuffleIdx=-1;                       // forget any precomputed pick
+  if(currentIdx>=0)prefetchNext();          // re-warm the now-different next track
   showToast(isShuffle?'隨機播放：開':'隨機播放：關');
 }
 function toggleRepeat(){
@@ -1585,6 +1685,8 @@ function reorderTracks(srcIdx,destIdx,insertBefore){
 
   const [moved]=allTracks.splice(srcIdx,1);
   allTracks.splice(insertAt,0,moved);
+  clearPrefetch();_nextShuffleIdx=-1;       // order changed → re-warm next
+  if(currentIdx>=0&&!audio.paused)prefetchNext();
 
   // Re-render: preserve active search filter
   const q=(document.getElementById('search-input')||{}).value||'';
@@ -1679,6 +1781,7 @@ function showToast(msg){
 
 /* ── Start ── */
 window.addEventListener('load',()=>{
+  buildArtwork();
   applyResponsive();
   // default mobile view = player
   if(isMobile())switchMobView('player');
